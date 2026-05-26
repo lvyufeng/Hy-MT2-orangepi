@@ -1,0 +1,13 @@
+{
+  "op": "RopeFullCustom",
+  "input_desc": [
+    {"name": "x",       "param_type": "required", "format": ["ND"], "type": ["float16"]},
+    {"name": "cos",     "param_type": "required", "format": ["ND"], "type": ["float16"]},
+    {"name": "sin",     "param_type": "required", "format": ["ND"], "type": ["float16"]},
+    {"name": "row_map", "param_type": "required", "format": ["ND"], "type": ["int32"]}
+  ],
+  "output_desc": [
+    {"name": "out", "param_type": "required", "format": ["ND"], "type": ["float16"]}
+  ],
+  "attr": []
+}

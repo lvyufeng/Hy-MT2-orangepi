@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 
@@ -68,6 +69,47 @@ bool close(float a, float b, float tol = 5e-3f) {
     return std::fabs(a - b) <= tol;
 }
 
+void check_rope(hy_mt2::AclContext& ctx, int64_t N) {
+    constexpr int64_t D = 128;
+    constexpr int64_t Half = D / 2;
+    std::vector<float> x_vals(static_cast<size_t>(N * D));
+    std::vector<float> cos_vals(static_cast<size_t>(4 * Half));
+    std::vector<float> sin_vals(static_cast<size_t>(4 * Half));
+    for (size_t i = 0; i < x_vals.size(); ++i) x_vals[i] = static_cast<float>(static_cast<int>(i % 19) - 9) * 0.01f;
+    for (size_t i = 0; i < cos_vals.size(); ++i) cos_vals[i] = 0.75f + static_cast<float>(i % 7) * 0.01f;
+    for (size_t i = 0; i < sin_vals.size(); ++i) sin_vals[i] = -0.2f + static_cast<float>(i % 5) * 0.02f;
+    std::vector<int32_t> row_to_t(static_cast<size_t>(N));
+    for (int64_t n = 0; n < N; ++n) row_to_t[static_cast<size_t>(n)] = static_cast<int32_t>((n * 2) % 4);
+
+    auto x = make_fp16_tensor({N, D}, x_vals);
+    auto cos = make_fp16_tensor({4, Half}, cos_vals);
+    auto sin = make_fp16_tensor({4, Half}, sin_vals);
+    hy_mt2::Tensor out({N, D}, hy_mt2::DType::Float16); out.allocate();
+    hy_mt2::apply_rope_full(x, cos, sin, row_to_t, out, ctx.stream());
+    const auto got = read_fp16(out);
+    const auto x_host = read_fp16(x);
+    const auto cos_host = read_fp16(cos);
+    const auto sin_host = read_fp16(sin);
+    for (int64_t n = 0; n < N; ++n) {
+        const int64_t pos = row_to_t[static_cast<size_t>(n)];
+        for (int64_t i = 0; i < Half; ++i) {
+            const float x1 = x_host[static_cast<size_t>(n * D + i)];
+            const float x2 = x_host[static_cast<size_t>(n * D + Half + i)];
+            const float c = cos_host[static_cast<size_t>(pos * Half + i)];
+            const float s = sin_host[static_cast<size_t>(pos * Half + i)];
+            const float y1 = x1 * c - x2 * s;
+            const float y2 = x2 * c + x1 * s;
+            if (!close(got[static_cast<size_t>(n * D + i)], y1, 5e-3f) ||
+                !close(got[static_cast<size_t>(n * D + Half + i)], y2, 5e-3f)) {
+                std::cerr << "rope mismatch N=" << N << " row=" << n << " i=" << i << '\n';
+                std::cerr << got[static_cast<size_t>(n * D + i)] << " vs " << y1 << ", "
+                          << got[static_cast<size_t>(n * D + Half + i)] << " vs " << y2 << '\n';
+                std::exit(1);
+            }
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -123,6 +165,10 @@ int main() {
     hy_mt2::rms_norm(a, gamma, norm, 1e-5, ctx.stream());
     const auto norm_out = read_fp16(norm);
     if (norm_out.empty()) return 1;
+
+    check_rope(ctx, 1);
+    check_rope(ctx, 4);
+    check_rope(ctx, 16);
 
     std::cout << "[ok] baseline aclnn ops wrappers run on NPU\n";
     return 0;

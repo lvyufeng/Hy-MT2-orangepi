@@ -2,6 +2,7 @@
 #include "hy_mt2/acl_context.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -34,6 +35,13 @@
 #define HY_MT2_HAS_ATTENTION_STEP_CUSTOM 1
 #else
 #define HY_MT2_HAS_ATTENTION_STEP_CUSTOM 0
+#endif
+
+#if __has_include(<aclnn_rope_full_custom.h>)
+#include <aclnn_rope_full_custom.h>
+#define HY_MT2_HAS_ROPE_FULL_CUSTOM 1
+#else
+#define HY_MT2_HAS_ROPE_FULL_CUSTOM 0
 #endif
 
 namespace hy_mt2 {
@@ -532,6 +540,29 @@ void apply_rope_full(const Tensor& x,
     for (int32_t t : row_to_t) {
         if (t < 0 || t >= cos_table.shape()[0]) throw std::runtime_error("apply_rope_full row_to_t out of range");
     }
+
+#if HY_MT2_HAS_ROPE_FULL_CUSTOM
+    if (Half <= 128 && std::getenv("HY_MT2_DISABLE_ROPE_FULL_CUSTOM") == nullptr) {
+        Tensor row_map({N}, DType::Int32);
+        row_map.allocate();
+        row_map.copy_from_host(row_to_t.data(), row_to_t.size() * sizeof(int32_t));
+        AclTensorHandle hx, hc, hs, hm, ho;
+        make_acl_tensor(x, hx);
+        make_acl_tensor(cos_table, hc);
+        make_acl_tensor(sin_table, hs);
+        make_acl_tensor(row_map, hm);
+        make_acl_tensor(out, ho);
+        uint64_t ws_size = 0;
+        aclOpExecutor* executor = nullptr;
+        auto ret = aclnnRopeFullCustomGetWorkspaceSize(hx.tensor, hc.tensor, hs.tensor, hm.tensor,
+                                                       ho.tensor, &ws_size, &executor);
+        if (ret != 0) {
+            throw std::runtime_error("aclnnRopeFullCustomGetWorkspaceSize failed: " + std::to_string(ret));
+        }
+        run_op("aclnnRopeFullCustom", ws_size, executor, stream, aclnnRopeFullCustom);
+        return;
+    }
+#endif
 
     Tensor x1({N, Half}, DType::Float16); x1.allocate();
     Tensor x2({N, Half}, DType::Float16); x2.allocate();
