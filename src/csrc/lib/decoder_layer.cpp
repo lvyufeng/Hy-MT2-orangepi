@@ -313,7 +313,14 @@ void run_layer_core(const Tensor& hidden,
     }
 
     Tensor normed({T, hidden_size}, DType::Float16); normed.allocate();
-    rms_norm(hidden, *weights.input_norm_weight, normed, config.rms_epsilon, stream);
+    const bool use_rms2048_custom = T == 1 && hidden_size == 2048 &&
+                                    has_rms_norm2048_custom() &&
+                                    std::getenv("HY_MT2_DISABLE_RMS_NORM2048_CUSTOM") == nullptr;
+    if (use_rms2048_custom) {
+        rms_norm2048_custom(hidden, *weights.input_norm_weight, config.rms_epsilon, normed, stream);
+    } else {
+        rms_norm(hidden, *weights.input_norm_weight, normed, config.rms_epsilon, stream);
+    }
 
     Tensor q_full({T, q_dim}, DType::Float16); q_full.allocate();
     Tensor k_full({T, kv_dim}, DType::Float16); k_full.allocate();
@@ -368,7 +375,11 @@ void run_layer_core(const Tensor& hidden,
     add(hidden, attn_proj, after_attn, stream);
 
     Tensor mlp_in({T, hidden_size}, DType::Float16); mlp_in.allocate();
-    rms_norm(after_attn, *weights.post_attention_norm_weight, mlp_in, config.rms_epsilon, stream);
+    if (use_rms2048_custom) {
+        rms_norm2048_custom(after_attn, *weights.post_attention_norm_weight, config.rms_epsilon, mlp_in, stream);
+    } else {
+        rms_norm(after_attn, *weights.post_attention_norm_weight, mlp_in, config.rms_epsilon, stream);
+    }
 
     Tensor gate({T, intermediate}, DType::Float16); gate.allocate();
     Tensor up({T, intermediate}, DType::Float16); up.allocate();

@@ -1,0 +1,11 @@
+{
+  "op": "RmsNorm2048Custom",
+  "input_desc": [
+    {"name": "x", "param_type": "required", "format": ["ND"], "type": ["float16"]},
+    {"name": "gamma", "param_type": "required", "format": ["ND"], "type": ["float16"]}
+  ],
+  "output_desc": [
+    {"name": "out", "param_type": "required", "format": ["ND"], "type": ["float16"]}
+  ],
+  "attr": [{"name": "epsilon", "param_type": "required", "type": "float"}]
+}

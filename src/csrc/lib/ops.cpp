@@ -51,6 +51,20 @@
 #define HY_MT2_HAS_RMS_NORM128_CUSTOM 0
 #endif
 
+#if __has_include(<aclnn_rms_norm2048_custom.h>)
+#include <aclnn_rms_norm2048_custom.h>
+#define HY_MT2_HAS_RMS_NORM2048_CUSTOM 1
+#else
+#define HY_MT2_HAS_RMS_NORM2048_CUSTOM 0
+#endif
+
+#if __has_include(<aclnn_silu_mul_custom.h>)
+#include <aclnn_silu_mul_custom.h>
+#define HY_MT2_HAS_SILU_MUL_CUSTOM 1
+#else
+#define HY_MT2_HAS_SILU_MUL_CUSTOM 0
+#endif
+
 namespace hy_mt2 {
 namespace {
 
@@ -318,6 +332,90 @@ void rms_norm128_custom(const Tensor& x,
     (void)out;
     (void)stream;
     throw std::runtime_error("rms_norm128_custom is not available in this build");
+#endif
+}
+
+bool has_rms_norm2048_custom() {
+    return HY_MT2_HAS_RMS_NORM2048_CUSTOM != 0;
+}
+
+void rms_norm2048_custom(const Tensor& x,
+                         const Tensor& gamma,
+                         double epsilon,
+                         Tensor& out,
+                         aclrtStream stream) {
+#if HY_MT2_HAS_RMS_NORM2048_CUSTOM
+    if (x.dtype() != DType::Float16 || gamma.dtype() != DType::Float16 || out.dtype() != DType::Float16) {
+        throw std::runtime_error("rms_norm2048_custom requires fp16 tensors");
+    }
+    if (x.shape().size() != 2 || out.shape() != x.shape()) {
+        throw std::runtime_error("rms_norm2048_custom expects 2D x/out with matching shape");
+    }
+    if (x.shape()[1] != 2048 || gamma.shape() != std::vector<int64_t>{2048}) {
+        throw std::runtime_error("rms_norm2048_custom only supports hidden=2048");
+    }
+
+    AclTensorHandle hx, hg, ho;
+    make_acl_tensor(x, hx);
+    make_acl_tensor(gamma, hg);
+    make_acl_tensor(out, ho);
+    uint64_t ws_size = 0;
+    aclOpExecutor* executor = nullptr;
+    auto ret = aclnnRmsNorm2048CustomGetWorkspaceSize(hx.tensor, hg.tensor,
+                                                      static_cast<float>(epsilon), ho.tensor,
+                                                      &ws_size, &executor);
+    if (ret != 0) {
+        throw std::runtime_error("aclnnRmsNorm2048CustomGetWorkspaceSize failed: " + std::to_string(ret));
+    }
+    run_op("aclnnRmsNorm2048Custom", ws_size, executor, stream, aclnnRmsNorm2048Custom);
+#else
+    (void)x;
+    (void)gamma;
+    (void)epsilon;
+    (void)out;
+    (void)stream;
+    throw std::runtime_error("rms_norm2048_custom is not available in this build");
+#endif
+}
+
+bool has_silu_mul_custom() {
+    return HY_MT2_HAS_SILU_MUL_CUSTOM != 0;
+}
+
+void silu_mul_custom(const Tensor& gate,
+                     const Tensor& up,
+                     Tensor& out,
+                     aclrtStream stream) {
+#if HY_MT2_HAS_SILU_MUL_CUSTOM
+    if (gate.dtype() != DType::Float16 || up.dtype() != DType::Float16 || out.dtype() != DType::Float16) {
+        throw std::runtime_error("silu_mul_custom requires fp16 tensors");
+    }
+    if (gate.shape() != up.shape() || gate.shape() != out.shape()) {
+        throw std::runtime_error("silu_mul_custom expects gate/up/out with matching shape");
+    }
+    if (gate.numel() == 0) return;
+    if ((gate.numel() % 16) != 0) {
+        throw std::runtime_error("silu_mul_custom requires numel to be 16-aligned");
+    }
+
+    AclTensorHandle hg, hu, ho;
+    make_acl_tensor(gate, hg);
+    make_acl_tensor(up, hu);
+    make_acl_tensor(out, ho);
+    uint64_t ws_size = 0;
+    aclOpExecutor* executor = nullptr;
+    auto ret = aclnnSiluMulCustomGetWorkspaceSize(hg.tensor, hu.tensor, ho.tensor,
+                                                  &ws_size, &executor);
+    if (ret != 0) {
+        throw std::runtime_error("aclnnSiluMulCustomGetWorkspaceSize failed: " + std::to_string(ret));
+    }
+    run_op("aclnnSiluMulCustom", ws_size, executor, stream, aclnnSiluMulCustom);
+#else
+    (void)gate;
+    (void)up;
+    (void)out;
+    (void)stream;
+    throw std::runtime_error("silu_mul_custom is not available in this build");
 #endif
 }
 

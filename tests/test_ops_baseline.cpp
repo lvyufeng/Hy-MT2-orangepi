@@ -204,6 +204,68 @@ int main() {
         }
     }
 
+    if (hy_mt2::has_rms_norm2048_custom()) {
+        for (int64_t N : {1, 4}) {
+            constexpr int64_t D = 2048;
+            std::vector<float> x_vals(static_cast<size_t>(N * D));
+            std::vector<float> gamma_vals(D);
+            for (size_t i = 0; i < x_vals.size(); ++i) x_vals[i] = static_cast<float>(static_cast<int>(i % 23) - 11) * 0.02f;
+            for (size_t i = 0; i < gamma_vals.size(); ++i) gamma_vals[i] = 0.5f + static_cast<float>(i % 5) * 0.05f;
+            auto x = make_fp16_tensor({N, D}, x_vals);
+            auto gamma_t = make_fp16_tensor({D}, gamma_vals);
+            hy_mt2::Tensor out({N, D}, hy_mt2::DType::Float16); out.allocate();
+            const double eps = 1e-5;
+            hy_mt2::rms_norm2048_custom(x, gamma_t, eps, out, ctx.stream());
+            const auto got = read_fp16(out);
+            const auto x_host = read_fp16(x);
+            const auto g_host = read_fp16(gamma_t);
+            for (int64_t n = 0; n < N; ++n) {
+                double sumSq = 0.0;
+                for (int64_t i = 0; i < D; ++i) {
+                    const float v = x_host[static_cast<size_t>(n * D + i)];
+                    sumSq += static_cast<double>(v) * v;
+                }
+                const float invRms = static_cast<float>(1.0 / std::sqrt(sumSq / D + eps));
+                for (int64_t i = 0; i < D; ++i) {
+                    const float ref = x_host[static_cast<size_t>(n * D + i)] * invRms * g_host[static_cast<size_t>(i)];
+                    if (!close(got[static_cast<size_t>(n * D + i)], ref, 1e-2f)) {
+                        std::cerr << "rms_norm2048 mismatch N=" << N << " row=" << n << " i=" << i << ": "
+                                  << got[static_cast<size_t>(n * D + i)] << " vs " << ref << '\n';
+                        std::exit(1);
+                    }
+                }
+            }
+        }
+    }
+
+    if (hy_mt2::has_silu_mul_custom()) {
+        for (int64_t N : {1, 4, 16}) {
+            constexpr int64_t M = 256;
+            std::vector<float> gate_vals(static_cast<size_t>(N * M));
+            std::vector<float> up_vals(static_cast<size_t>(N * M));
+            for (size_t i = 0; i < gate_vals.size(); ++i) gate_vals[i] = static_cast<float>(static_cast<int>(i % 13) - 6) * 0.05f;
+            for (size_t i = 0; i < up_vals.size(); ++i) up_vals[i] = static_cast<float>(static_cast<int>(i % 11) - 5) * 0.07f;
+            auto gate = make_fp16_tensor({N, M}, gate_vals);
+            auto up = make_fp16_tensor({N, M}, up_vals);
+            hy_mt2::Tensor out({N, M}, hy_mt2::DType::Float16); out.allocate();
+            hy_mt2::silu_mul_custom(gate, up, out, ctx.stream());
+            const auto got = read_fp16(out);
+            const auto g_host = read_fp16(gate);
+            const auto u_host = read_fp16(up);
+            for (int64_t i = 0; i < N * M; ++i) {
+                const float g = g_host[static_cast<size_t>(i)];
+                const float u = u_host[static_cast<size_t>(i)];
+                const float silu = g / (1.0f + std::exp(-g));
+                const float ref = silu * u;
+                if (!close(got[static_cast<size_t>(i)], ref, 5e-3f)) {
+                    std::cerr << "silu_mul_custom mismatch N=" << N << " i=" << i << ": "
+                              << got[static_cast<size_t>(i)] << " vs " << ref << '\n';
+                    std::exit(1);
+                }
+            }
+        }
+    }
+
     std::cout << "[ok] baseline aclnn ops wrappers run on NPU\n";
     return 0;
 }

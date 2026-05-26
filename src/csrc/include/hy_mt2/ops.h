@@ -33,6 +33,17 @@ void rms_norm128_custom(const Tensor& x,
                         double epsilon,
                         Tensor& out,
                         aclrtStream stream);
+bool has_rms_norm2048_custom();
+void rms_norm2048_custom(const Tensor& x,
+                         const Tensor& gamma,
+                         double epsilon,
+                         Tensor& out,
+                         aclrtStream stream);
+bool has_silu_mul_custom();
+void silu_mul_custom(const Tensor& gate,
+                     const Tensor& up,
+                     Tensor& out,
+                     aclrtStream stream);
 void argmax_last_dim(const Tensor& self, Tensor& out, aclrtStream stream);
 
 void add(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream stream);
