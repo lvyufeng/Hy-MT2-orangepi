@@ -189,18 +189,15 @@ void write_kv_cache(const Tensor& k_rope,
     const int64_t T = v_full.shape()[0];
     const int64_t kv_dim = num_kv_heads * head_dim;
     const size_t elem = dtype_size(DType::Float16);
-    const size_t head_bytes = static_cast<size_t>(head_dim) * elem;
     const size_t row_bytes = static_cast<size_t>(kv_dim) * elem;
     auto* ks = static_cast<const uint8_t*>(k_rope.data());
     auto* kd = static_cast<uint8_t*>(cache.k_cache.data());
     for (int64_t t = 0; t < T; ++t) {
-        for (int64_t h = 0; h < num_kv_heads; ++h) {
-            check_acl(aclrtMemcpyAsync(kd + static_cast<size_t>(cache_offset + t) * row_bytes + static_cast<size_t>(h) * head_bytes,
-                                       head_bytes,
-                                       ks + static_cast<size_t>(t * num_kv_heads + h) * head_bytes,
-                                       head_bytes, ACL_MEMCPY_DEVICE_TO_DEVICE, stream),
-                      "write k cache");
-        }
+        check_acl(aclrtMemcpyAsync(kd + static_cast<size_t>(cache_offset + t) * row_bytes,
+                                   row_bytes,
+                                   ks + static_cast<size_t>(t) * row_bytes,
+                                   row_bytes, ACL_MEMCPY_DEVICE_TO_DEVICE, stream),
+                  "write k cache");
     }
 
     auto* vs = static_cast<const uint8_t*>(v_full.data());
