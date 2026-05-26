@@ -61,6 +61,7 @@ struct DecodeState {
     int64_t max_seq_len{0};
     int64_t seq_len{0};
     std::vector<LayerCache> layers;
+    DecoderStepScratch scratch;
 };
 
 LanguageModelWeights load_language_model_weights(WeightsIndex& index,

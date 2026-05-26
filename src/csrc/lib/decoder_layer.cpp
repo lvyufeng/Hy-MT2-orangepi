@@ -299,7 +299,8 @@ void run_layer_core(const Tensor& hidden,
                     LayerCache& cache,
                     int64_t cache_offset,
                     Tensor& out,
-                    aclrtStream stream) {
+                    aclrtStream stream,
+                    DecoderStepScratch* scratch = nullptr) {
     validate_shapes(hidden, weights, config, out);
     const int64_t T = hidden.shape()[0];
     const int64_t hidden_size = hidden.shape()[1];
@@ -312,7 +313,27 @@ void run_layer_core(const Tensor& hidden,
         throw std::runtime_error("decoder cache shape/offset mismatch");
     }
 
-    Tensor normed({T, hidden_size}, DType::Float16); normed.allocate();
+    // For T==1 decode steps, the caller may supply a scratch with pre-allocated
+    // temp tensors so we skip ~10 aclrtMalloc/Free per layer. For prefill (T>1),
+    // we always fall back to per-call allocation since shapes vary by T.
+    const bool use_scratch = scratch != nullptr && T == 1;
+
+    std::vector<Tensor> owned;
+    owned.reserve(19);
+    auto get_tensor = [&](Tensor* slot, std::vector<int64_t> shape) -> Tensor& {
+        if (use_scratch && slot) {
+            if (slot->shape() != shape) {
+                throw std::runtime_error("DecoderStepScratch shape mismatch");
+            }
+            return *slot;
+        }
+        Tensor t(std::move(shape), DType::Float16);
+        t.allocate();
+        owned.push_back(std::move(t));
+        return owned.back();
+    };
+
+    Tensor& normed = get_tensor(use_scratch ? &scratch->normed : nullptr, {T, hidden_size});
     const bool use_rms2048_custom = T == 1 && hidden_size == 2048 &&
                                     has_rms_norm2048_custom() &&
                                     std::getenv("HY_MT2_DISABLE_RMS_NORM2048_CUSTOM") == nullptr;
@@ -322,20 +343,20 @@ void run_layer_core(const Tensor& hidden,
         rms_norm(hidden, *weights.input_norm_weight, normed, config.rms_epsilon, stream);
     }
 
-    Tensor q_full({T, q_dim}, DType::Float16); q_full.allocate();
-    Tensor k_full({T, kv_dim}, DType::Float16); k_full.allocate();
-    Tensor v_full({T, kv_dim}, DType::Float16); v_full.allocate();
+    Tensor& q_full = get_tensor(use_scratch ? &scratch->q_full : nullptr, {T, q_dim});
+    Tensor& k_full = get_tensor(use_scratch ? &scratch->k_full : nullptr, {T, kv_dim});
+    Tensor& v_full = get_tensor(use_scratch ? &scratch->v_full : nullptr, {T, kv_dim});
     matmul_b_natural(normed, *weights.q_proj_weight, q_full, stream);
     matmul_b_natural(normed, *weights.k_proj_weight, k_full, stream);
     matmul_b_natural(normed, *weights.v_proj_weight, v_full, stream);
 
-    Tensor q_heads({T * config.num_q_heads, config.head_dim}, DType::Float16); q_heads.allocate();
-    Tensor k_heads({T * config.num_kv_heads, config.head_dim}, DType::Float16); k_heads.allocate();
+    Tensor& q_heads = get_tensor(use_scratch ? &scratch->q_heads : nullptr, {T * config.num_q_heads, config.head_dim});
+    Tensor& k_heads = get_tensor(use_scratch ? &scratch->k_heads : nullptr, {T * config.num_kv_heads, config.head_dim});
     copy_heads_from_cols(q_full, config.num_q_heads, config.head_dim, q_heads, stream);
     copy_heads_from_cols(k_full, config.num_kv_heads, config.head_dim, k_heads, stream);
 
-    Tensor q_normed({T * config.num_q_heads, config.head_dim}, DType::Float16); q_normed.allocate();
-    Tensor k_normed({T * config.num_kv_heads, config.head_dim}, DType::Float16); k_normed.allocate();
+    Tensor& q_normed = get_tensor(use_scratch ? &scratch->q_normed : nullptr, {T * config.num_q_heads, config.head_dim});
+    Tensor& k_normed = get_tensor(use_scratch ? &scratch->k_normed : nullptr, {T * config.num_kv_heads, config.head_dim});
     const bool use_rms_custom = T == 1 && config.head_dim == 128 &&
                                 has_rms_norm128_custom() &&
                                 std::getenv("HY_MT2_DISABLE_RMS_NORM128_CUSTOM") == nullptr;
@@ -354,38 +375,50 @@ void run_layer_core(const Tensor& hidden,
         for (int64_t h = 0; h < config.num_kv_heads; ++h) k_row_to_t[static_cast<size_t>(t * config.num_kv_heads + h)] = row_to_t[static_cast<size_t>(t)];
     }
 
-    Tensor q_rope({T * config.num_q_heads, config.head_dim}, DType::Float16); q_rope.allocate();
-    Tensor k_rope({T * config.num_kv_heads, config.head_dim}, DType::Float16); k_rope.allocate();
-    apply_rope_full(q_normed, cos_table, sin_table, q_row_to_t, q_rope, stream);
-    apply_rope_full(k_normed, cos_table, sin_table, k_row_to_t, k_rope, stream);
+    Tensor& q_rope = get_tensor(use_scratch ? &scratch->q_rope : nullptr, {T * config.num_q_heads, config.head_dim});
+    Tensor& k_rope = get_tensor(use_scratch ? &scratch->k_rope : nullptr, {T * config.num_kv_heads, config.head_dim});
+    if (use_scratch) {
+        // Scratch path: row maps live on device in scratch->q_row_map /
+        // scratch->k_row_map. Sync H2D of 4-16 bytes (1-4 int32) is much
+        // cheaper than the per-layer aclrtMalloc the standalone wrapper does.
+        scratch->q_row_map.copy_from_host(q_row_to_t.data(),
+                                          q_row_to_t.size() * sizeof(int32_t));
+        scratch->k_row_map.copy_from_host(k_row_to_t.data(),
+                                          k_row_to_t.size() * sizeof(int32_t));
+        apply_rope_full_device_map(q_normed, cos_table, sin_table, scratch->q_row_map, q_rope, stream);
+        apply_rope_full_device_map(k_normed, cos_table, sin_table, scratch->k_row_map, k_rope, stream);
+    } else {
+        apply_rope_full(q_normed, cos_table, sin_table, q_row_to_t, q_rope, stream);
+        apply_rope_full(k_normed, cos_table, sin_table, k_row_to_t, k_rope, stream);
+    }
 
     write_kv_cache(k_rope, v_full, config.num_kv_heads, config.head_dim, cache_offset, cache, stream);
 
-    Tensor attn_out({T, q_dim}, DType::Float16); attn_out.allocate();
+    Tensor& attn_out = get_tensor(use_scratch ? &scratch->attn_out : nullptr, {T, q_dim});
     if (T == 1) {
         run_step_attention(q_rope, cache, cache_offset + 1, config, attn_out, stream);
     } else {
         run_prefill_attention(q_rope, k_rope, v_full, row_to_t, config, attn_out, stream);
     }
 
-    Tensor attn_proj({T, hidden_size}, DType::Float16); attn_proj.allocate();
+    Tensor& attn_proj = get_tensor(use_scratch ? &scratch->attn_proj : nullptr, {T, hidden_size});
     matmul_b_natural(attn_out, *weights.o_proj_weight, attn_proj, stream);
 
-    Tensor after_attn({T, hidden_size}, DType::Float16); after_attn.allocate();
+    Tensor& after_attn = get_tensor(use_scratch ? &scratch->after_attn : nullptr, {T, hidden_size});
     add(hidden, attn_proj, after_attn, stream);
 
-    Tensor mlp_in({T, hidden_size}, DType::Float16); mlp_in.allocate();
+    Tensor& mlp_in = get_tensor(use_scratch ? &scratch->mlp_in : nullptr, {T, hidden_size});
     if (use_rms2048_custom) {
         rms_norm2048_custom(after_attn, *weights.post_attention_norm_weight, config.rms_epsilon, mlp_in, stream);
     } else {
         rms_norm(after_attn, *weights.post_attention_norm_weight, mlp_in, config.rms_epsilon, stream);
     }
 
-    Tensor gate({T, intermediate}, DType::Float16); gate.allocate();
-    Tensor up({T, intermediate}, DType::Float16); up.allocate();
-    Tensor gate_act({T, intermediate}, DType::Float16); gate_act.allocate();
-    Tensor gated({T, intermediate}, DType::Float16); gated.allocate();
-    Tensor mlp_out({T, hidden_size}, DType::Float16); mlp_out.allocate();
+    Tensor& gate = get_tensor(use_scratch ? &scratch->gate : nullptr, {T, intermediate});
+    Tensor& up = get_tensor(use_scratch ? &scratch->up : nullptr, {T, intermediate});
+    Tensor& gate_act = get_tensor(use_scratch ? &scratch->gate_act : nullptr, {T, intermediate});
+    Tensor& gated = get_tensor(use_scratch ? &scratch->gated : nullptr, {T, intermediate});
+    Tensor& mlp_out = get_tensor(use_scratch ? &scratch->mlp_out : nullptr, {T, hidden_size});
     matmul_b_natural(mlp_in, *weights.gate_proj_weight, gate, stream);
     matmul_b_natural(mlp_in, *weights.up_proj_weight, up, stream);
     silu(gate, gate_act, stream);
@@ -417,12 +450,50 @@ void decoder_layer_step(const Tensor& hidden,
                         const DecoderLayerConfig& config,
                         LayerCache& cache,
                         Tensor& out,
-                        aclrtStream stream) {
+                        aclrtStream stream,
+                        DecoderStepScratch* scratch) {
     if (hidden.shape().empty() || hidden.shape()[0] != 1) {
         throw std::runtime_error("decoder_layer_step hidden must be [1, H]");
     }
     std::vector<int32_t> row_to_t{pos};
-    run_layer_core(hidden, weights, cos_table, sin_table, row_to_t, config, cache, cache_len, out, stream);
+    run_layer_core(hidden, weights, cos_table, sin_table, row_to_t, config, cache, cache_len, out, stream, scratch);
+}
+
+DecoderStepScratch make_decoder_step_scratch(int64_t hidden_size,
+                                             int64_t intermediate_size,
+                                             const DecoderLayerConfig& config) {
+    const int64_t q_dim = config.num_q_heads * config.head_dim;
+    const int64_t kv_dim = config.num_kv_heads * config.head_dim;
+    auto alloc = [](std::vector<int64_t> shape) {
+        Tensor t(std::move(shape), DType::Float16);
+        t.allocate();
+        return t;
+    };
+    DecoderStepScratch s;
+    s.normed     = alloc({1, hidden_size});
+    s.q_full     = alloc({1, q_dim});
+    s.k_full     = alloc({1, kv_dim});
+    s.v_full     = alloc({1, kv_dim});
+    s.q_heads    = alloc({config.num_q_heads, config.head_dim});
+    s.k_heads    = alloc({config.num_kv_heads, config.head_dim});
+    s.q_normed   = alloc({config.num_q_heads, config.head_dim});
+    s.k_normed   = alloc({config.num_kv_heads, config.head_dim});
+    s.q_rope     = alloc({config.num_q_heads, config.head_dim});
+    s.k_rope     = alloc({config.num_kv_heads, config.head_dim});
+    s.attn_out   = alloc({1, q_dim});
+    s.attn_proj  = alloc({1, hidden_size});
+    s.after_attn = alloc({1, hidden_size});
+    s.mlp_in     = alloc({1, hidden_size});
+    s.gate       = alloc({1, intermediate_size});
+    s.up         = alloc({1, intermediate_size});
+    s.gate_act   = alloc({1, intermediate_size});
+    s.gated      = alloc({1, intermediate_size});
+    s.mlp_out    = alloc({1, hidden_size});
+    Tensor qmap({config.num_q_heads}, DType::Int32); qmap.allocate();
+    Tensor kmap({config.num_kv_heads}, DType::Int32); kmap.allocate();
+    s.q_row_map = std::move(qmap);
+    s.k_row_map = std::move(kmap);
+    return s;
 }
 
 LayerCache make_layer_cache(int64_t max_seq_len,

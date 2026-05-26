@@ -205,6 +205,7 @@ DecodeState make_decode_state(int64_t max_seq_len,
     for (int64_t layer = 0; layer < cfg.num_layers; ++layer) {
         state.layers.push_back(make_layer_cache(max_seq_len, dcfg, stream));
     }
+    state.scratch = make_decoder_step_scratch(cfg.hidden_size, cfg.intermediate_size, dcfg);
     return state;
 }
 
@@ -344,7 +345,8 @@ int64_t decode_step_greedy(int32_t token_id,
     for (int64_t layer = 0; layer < cfg.num_layers; ++layer) {
         const auto& lw = weights.layers[static_cast<size_t>(layer)];
         decoder_layer_step(hidden, layer_weight_view(lw), cos_table, sin_table,
-                           pos, state.seq_len, dcfg, state.layers[static_cast<size_t>(layer)], next, stream);
+                           pos, state.seq_len, dcfg, state.layers[static_cast<size_t>(layer)], next, stream,
+                           &state.scratch);
         copy_tensor(next, hidden, stream);
     }
     ++state.seq_len;

@@ -71,4 +71,14 @@ void apply_rope_full(const Tensor& x,
                      Tensor& out,
                      aclrtStream stream);
 
+// Same as apply_rope_full but takes a pre-allocated int32 row_map device
+// tensor of shape {N}; the caller must populate it with N row indices before
+// calling. Saves an aclrtMalloc + H2D copy per call.
+void apply_rope_full_device_map(const Tensor& x,
+                                const Tensor& cos_table,
+                                const Tensor& sin_table,
+                                const Tensor& row_map,
+                                Tensor& out,
+                                aclrtStream stream);
+
 }  // namespace hy_mt2

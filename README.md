@@ -61,10 +61,10 @@ On Orange Pi AIPro 8T, current FP16 baseline:
 | bench | setting | result |
 |---|---|---:|
 | prefill | prompt_len=8 | 22.74 s · 0.35 tok/s |
-| decode | prompt_len=8, decode=30 | 566.29 ms/token · 1.77 tok/s |
+| decode | prompt_len=8, decode=30 | 553.34 ms/token · 1.81 tok/s |
 | lm_head | 15 × 8192 cube chunks | 37.67 ms/pass |
 
-The custom cube path improves common decode M=1 projection/MLP matmuls by roughly 40-50x versus the original public-aclnn transposed-view path; custom decode-attention, RoPE, head-dim-128 q/k RMSNorm, and hidden-2048 RMSNorm paths bring the current 30-token decode bench to about 1.77 tok/s. The remaining bottlenecks are MLP gate/up/down matmul bandwidth and the still-FP16 weight bandwidth.
+The custom cube path improves common decode M=1 projection/MLP matmuls by roughly 40-50x versus the original public-aclnn transposed-view path; custom decode-attention, RoPE (with device-resident row_map), head-dim-128 q/k RMSNorm, and hidden-2048 RMSNorm paths, plus per-token scratch reuse across all 32 layers, bring the current 30-token decode bench to about 1.81 tok/s. The remaining bottlenecks are MLP gate/up/down matmul bandwidth and the still-FP16 weight bandwidth.
 
 Useful benchmark commands:
 

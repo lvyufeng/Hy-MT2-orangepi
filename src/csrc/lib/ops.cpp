@@ -772,4 +772,61 @@ void apply_rope_full(const Tensor& x,
     check_acl(aclrtSynchronizeStream(stream), "apply_rope_full scatter sync");
 }
 
+void apply_rope_full_device_map(const Tensor& x,
+                                const Tensor& cos_table,
+                                const Tensor& sin_table,
+                                const Tensor& row_map,
+                                Tensor& out,
+                                aclrtStream stream) {
+#if HY_MT2_HAS_ROPE_FULL_CUSTOM
+    if (x.dtype() != DType::Float16 || cos_table.dtype() != DType::Float16 ||
+        sin_table.dtype() != DType::Float16 || out.dtype() != DType::Float16) {
+        throw std::runtime_error("apply_rope_full_device_map requires fp16 tensors");
+    }
+    if (row_map.dtype() != DType::Int32) {
+        throw std::runtime_error("apply_rope_full_device_map row_map must be int32");
+    }
+    if (x.shape().size() != 2 || out.shape() != x.shape()) {
+        throw std::runtime_error("apply_rope_full_device_map expects x/out shape [N, D]");
+    }
+    const int64_t N = x.shape()[0];
+    const int64_t D = x.shape()[1];
+    if (D <= 0 || D % 2 != 0) throw std::runtime_error("apply_rope_full_device_map D must be positive and even");
+    const int64_t Half = D / 2;
+    if (cos_table.shape().size() != 2 || cos_table.shape()[1] != Half ||
+        sin_table.shape() != cos_table.shape()) {
+        throw std::runtime_error("apply_rope_full_device_map cos/sin shape mismatch");
+    }
+    if (row_map.shape() != std::vector<int64_t>{N}) {
+        throw std::runtime_error("apply_rope_full_device_map row_map shape must be [N]");
+    }
+    if (Half > 128) {
+        throw std::runtime_error("apply_rope_full_device_map requires head_dim/2 <= 128");
+    }
+
+    AclTensorHandle hx, hc, hs, hm, ho;
+    make_acl_tensor(x, hx);
+    make_acl_tensor(cos_table, hc);
+    make_acl_tensor(sin_table, hs);
+    make_acl_tensor(row_map, hm);
+    make_acl_tensor(out, ho);
+    uint64_t ws_size = 0;
+    aclOpExecutor* executor = nullptr;
+    auto ret = aclnnRopeFullCustomGetWorkspaceSize(hx.tensor, hc.tensor, hs.tensor, hm.tensor,
+                                                   ho.tensor, &ws_size, &executor);
+    if (ret != 0) {
+        throw std::runtime_error("aclnnRopeFullCustomGetWorkspaceSize failed: " + std::to_string(ret));
+    }
+    run_op("aclnnRopeFullCustom", ws_size, executor, stream, aclnnRopeFullCustom);
+#else
+    (void)x;
+    (void)cos_table;
+    (void)sin_table;
+    (void)row_map;
+    (void)out;
+    (void)stream;
+    throw std::runtime_error("apply_rope_full_device_map is not available in this build");
+#endif
+}
+
 }  // namespace hy_mt2
