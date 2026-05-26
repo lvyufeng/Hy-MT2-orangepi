@@ -47,7 +47,7 @@ struct LayerWeights {
 struct LmHeadChunk {
     int64_t start_vocab{0};
     int64_t valid_vocab{0};
-    Tensor weight;  // [valid_or_padded_vocab, hidden]
+    Tensor weight;  // [padded_vocab_chunk, hidden]
 };
 
 struct LanguageModelWeights {

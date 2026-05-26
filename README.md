@@ -8,11 +8,10 @@ the Ascend 310B4 NPU in the Orange Pi AIPro 20T board. **All compute runs
 on the NPU through a single C++ engine — the tokenizer is wrapped via
 [mlc-ai/tokenizers-cpp][tokcpp] (no Python on the hot path).**
 
-> 🚧 **Status (Phase 4)**: scaffold, NPU runtime smoke test,
-> safetensors loader, `tokenizers-cpp` wrapper, baseline public-aclnn ops,
-> custom_opp scaffold, Hy-MT2 decoder layer, 32-layer tied-embedding
-> language-model loop, `libhy_mt2.so`, `Translator`, and `hy_mt2_translate`
-> are in place. Bench/perf rounds land in Phase 5.
+> 🚧 **Status (Phase 5)**: v1 C++/CANN path is in place through
+> `libhy_mt2.so`, `Translator`, `hy_mt2_translate`, synthetic NPU smoke tests,
+> LM-head chunking, and prefill/decode/matmul benchmark binaries. The next
+> work is Phase 6 performance squeeze (quantization and hidden aclnn shims).
 
 This repo follows the same shape as my earlier
 [`lvyufeng/minicpm-v-4.6-orangepi`][minicpmv]; several infrastructure
@@ -73,6 +72,30 @@ source scripts/set_env.sh
 Input is one source sentence per stdin line. `--src` is accepted for CLI
 compatibility, but the current Hy-MT2 prompt only needs the target language.
 
+## Benchmarks
+
+```bash
+source scripts/set_env.sh
+./build/bench_matmul_throughput --iters 20
+./build/bench_prefill --model ./Hy-MT2-1.8B --prompt-len 8 --iters 1
+./build/bench_decode --model ./Hy-MT2-1.8B --prompt-len 8 --decode 30
+```
+
+Current public-aclnn matmul microbench snapshot on this Orange Pi AIPro 20T
+(`--iters 1`, fp16 tensors):
+
+| M | N | K | ms/iter | GFLOP/s |
+|---:|---:|---:|---:|---:|
+| 1 | 2048 | 2048 | 26.46 | 0.32 |
+| 1 | 512 | 2048 | 6.80 | 0.31 |
+| 1 | 6144 | 2048 | 80.77 | 0.31 |
+| 1 | 2048 | 6144 | 79.63 | 0.32 |
+| 1 | 120818 | 2048 | 364.07 | 1.36 |
+| 16 | 2048 | 2048 | 0.69 | 194.01 |
+
+These numbers confirm the decode hot path needs cube/custom-kernel routing for
+M=1 matmuls; the batched path is already much healthier.
+
 ## Repository layout
 
 ```
@@ -97,7 +120,7 @@ Hy-MT2-orangepi/
 | 2 | Ops + custom AscendC kernels (cube matmul, RMSNorm, SwiGLU, attention-step scaffold; baseline public-aclnn wrappers) | ✅ done |
 | 3 | Hy-MT2 decoder layer + full language model (32 layers, GQA 16/4, tie embeddings) | ✅ done |
 | 4 | `Translator` API + `hy_mt2_translate` CLI | ✅ done |
-| 5 | Bench + first perf rounds (lm_head tiling, prefill/decode split) | |
+| 5 | Bench + first perf rounds (lm_head chunking, prefill/decode/matmul benches) | ✅ done |
 | 6 | W8A16 (aclnnQuantMatmulV3), IFA/RoPE aclnn shims, GGUF Q4_0 | |
 
 ## Hy-MT2 architecture (target)

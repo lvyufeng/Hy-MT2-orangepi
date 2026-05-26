@@ -107,6 +107,33 @@ void check_config(const LanguageModelConfig& cfg) {
     if (cfg.num_layers <= 0 || cfg.vocab_size <= 0 || cfg.intermediate_size <= 0) throw std::runtime_error("LanguageModelConfig invalid size");
 }
 
+std::vector<LmHeadChunk> build_lm_head_chunks(const Tensor& embed, const LanguageModelConfig& cfg) {
+    constexpr int64_t kChunkVocab = 8192;
+    if (embed.shape() != std::vector<int64_t>{cfg.vocab_size, cfg.hidden_size}) {
+        throw std::runtime_error("build_lm_head_chunks embedding shape mismatch");
+    }
+    std::vector<uint16_t> embed_host(static_cast<size_t>(cfg.vocab_size) * cfg.hidden_size);
+    embed.copy_to_host(embed_host.data(), embed_host.size() * sizeof(uint16_t));
+
+    std::vector<LmHeadChunk> chunks;
+    chunks.reserve(static_cast<size_t>((cfg.vocab_size + kChunkVocab - 1) / kChunkVocab));
+    std::vector<uint16_t> chunk_host(static_cast<size_t>(kChunkVocab) * cfg.hidden_size);
+    for (int64_t start = 0; start < cfg.vocab_size; start += kChunkVocab) {
+        const int64_t valid = std::min<int64_t>(kChunkVocab, cfg.vocab_size - start);
+        std::fill(chunk_host.begin(), chunk_host.end(), uint16_t{0});
+        std::copy_n(embed_host.begin() + static_cast<size_t>(start) * cfg.hidden_size,
+                    static_cast<size_t>(valid) * cfg.hidden_size,
+                    chunk_host.begin());
+        LmHeadChunk chunk;
+        chunk.start_vocab = start;
+        chunk.valid_vocab = valid;
+        chunk.weight = Tensor({kChunkVocab, cfg.hidden_size}, DType::Float16);
+        chunk.weight.copy_from_host(chunk_host.data(), chunk_host.size() * sizeof(uint16_t));
+        chunks.push_back(std::move(chunk));
+    }
+    return chunks;
+}
+
 }  // namespace
 
 LanguageModelConfig default_hy_mt2_config() {
@@ -134,6 +161,7 @@ LanguageModelWeights load_language_model_weights(WeightsIndex& index,
         lw.up_w = load_layer_weight(index, layer, "mlp.up_proj.weight");
         lw.down_w = load_layer_weight(index, layer, "mlp.down_proj.weight");
     }
+    w.lm_head_chunks = build_lm_head_chunks(w.embed, cfg);
     return w;
 }
 
@@ -242,18 +270,22 @@ int64_t lm_head_greedy(const Tensor& last_hidden_1xH,
     Tensor normed({1, cfg.hidden_size}, DType::Float16); normed.allocate();
     rms_norm(last_hidden_1xH, weights.final_norm_w, normed, cfg.rms_epsilon, stream);
 
-    Tensor logits({1, cfg.vocab_size}, DType::Float16); logits.allocate();
-    matmul_b_transposed(normed, weights.embed, logits, stream);
+    if (weights.lm_head_chunks.empty()) throw std::runtime_error("lm_head_greedy missing lm_head chunks");
+    const int64_t chunk_vocab = weights.lm_head_chunks.front().weight.shape()[0];
+    Tensor logits({1, chunk_vocab}, DType::Float16); logits.allocate();
+    std::vector<uint16_t> logits_host(static_cast<size_t>(chunk_vocab));
 
-    std::vector<uint16_t> logits_host(static_cast<size_t>(cfg.vocab_size));
-    logits.copy_to_host(logits_host.data(), logits_host.size() * sizeof(uint16_t));
     int64_t best = 0;
     float best_logit = -std::numeric_limits<float>::infinity();
-    for (int64_t i = 0; i < cfg.vocab_size; ++i) {
-        const float v = f16_bits_to_f32(logits_host[static_cast<size_t>(i)]);
-        if (v > best_logit) {
-            best_logit = v;
-            best = i;
+    for (const auto& chunk : weights.lm_head_chunks) {
+        matmul_b_transposed(normed, chunk.weight, logits, stream);
+        logits.copy_to_host(logits_host.data(), logits_host.size() * sizeof(uint16_t));
+        for (int64_t i = 0; i < chunk.valid_vocab; ++i) {
+            const float v = f16_bits_to_f32(logits_host[static_cast<size_t>(i)]);
+            if (v > best_logit) {
+                best_logit = v;
+                best = chunk.start_vocab + i;
+            }
         }
     }
     return best;

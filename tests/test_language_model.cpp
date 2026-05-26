@@ -65,14 +65,20 @@ int main() {
     cfg.max_position_embeddings = 8;
     cfg.eos_token_id = 3;
 
-    hy_mt2::LanguageModelWeights w;
-    w.embed = make_tensor({4, 4}, {
+    const std::vector<float> identity_embed = {
         1.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 1.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 1.0f,
-    });
+    };
+    hy_mt2::LanguageModelWeights w;
+    w.embed = make_tensor({4, 4}, identity_embed);
     w.final_norm_w = filled({4}, 1.0f);
+    hy_mt2::LmHeadChunk chunk;
+    chunk.start_vocab = 0;
+    chunk.valid_vocab = 4;
+    chunk.weight = make_tensor({4, 4}, identity_embed);
+    w.lm_head_chunks.push_back(std::move(chunk));
     w.layers.push_back(make_zero_layer());
 
     hy_mt2::Tensor cos;
