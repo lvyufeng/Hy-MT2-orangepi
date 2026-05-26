@@ -17,8 +17,10 @@
 #include <aclnnop/aclnn_mul.h>
 #include <aclnnop/aclnn_permute.h>
 #include <aclnnop/aclnn_rsqrt.h>
+#include <aclnnop/aclnn_sigmoid.h>
 #include <aclnnop/aclnn_silu.h>
 #include <aclnnop/aclnn_softmax.h>
+#include <aclnnop/aclnn_sub.h>
 
 namespace hy_mt2 {
 namespace {
@@ -211,6 +213,39 @@ void silu(const Tensor& self, Tensor& out, aclrtStream stream) {
     run_op("aclnnSilu", ws_size, executor, stream, aclnnSilu);
 }
 
+void sigmoid(const Tensor& self, Tensor& out, aclrtStream stream) {
+    check_same_shape(self, out, "sigmoid");
+    AclTensorHandle hs, ho;
+    make_acl_tensor(self, hs);
+    make_acl_tensor(out, ho);
+    uint64_t ws_size = 0;
+    aclOpExecutor* executor = nullptr;
+    auto ret = aclnnSigmoidGetWorkspaceSize(hs.tensor, ho.tensor, &ws_size, &executor);
+    if (ret != 0) throw std::runtime_error("aclnnSigmoidGetWorkspaceSize failed: " + std::to_string(ret));
+    run_op("aclnnSigmoid", ws_size, executor, stream, aclnnSigmoid);
+}
+
+void sub(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream stream) {
+    check_same_shape(a, out, "sub");
+    AclTensorHandle ha, hb, ho;
+    make_acl_tensor(a, ha);
+    make_acl_tensor(b, hb);
+    make_acl_tensor(out, ho);
+    float alpha_value = 1.0f;
+    aclScalar* alpha = aclCreateScalar(&alpha_value, ACL_FLOAT);
+    if (!alpha) throw std::runtime_error("aclCreateScalar(alpha) failed");
+    uint64_t ws_size = 0;
+    aclOpExecutor* executor = nullptr;
+    auto ret = aclnnSubGetWorkspaceSize(ha.tensor, hb.tensor, alpha, ho.tensor, &ws_size, &executor);
+    if (ret != 0) {
+        aclDestroyScalar(alpha);
+        throw std::runtime_error("aclnnSubGetWorkspaceSize failed: " + std::to_string(ret));
+    }
+    try { run_op("aclnnSub", ws_size, executor, stream, aclnnSub); }
+    catch (...) { aclDestroyScalar(alpha); throw; }
+    aclDestroyScalar(alpha);
+}
+
 void softmax_last_dim(const Tensor& self, Tensor& out, aclrtStream stream) {
     check_same_shape(self, out, "softmax");
     if (self.shape().empty()) throw std::runtime_error("softmax input must have rank >= 1");
@@ -359,6 +394,93 @@ void mean(const Tensor& self, const std::vector<int64_t>& dims, bool keep_dim, T
     try { run_op("aclnnMean", ws_size, executor, stream, aclnnMean); }
     catch (...) { aclDestroyIntArray(dim_arr); throw; }
     aclDestroyIntArray(dim_arr);
+}
+
+void apply_rope_full(const Tensor& x,
+                     const Tensor& cos_table,
+                     const Tensor& sin_table,
+                     const std::vector<int32_t>& row_to_t,
+                     Tensor& out,
+                     aclrtStream stream) {
+    if (x.dtype() != DType::Float16 || cos_table.dtype() != DType::Float16 ||
+        sin_table.dtype() != DType::Float16 || out.dtype() != DType::Float16) {
+        throw std::runtime_error("apply_rope_full requires fp16 tensors");
+    }
+    if (x.shape().size() != 2 || out.shape() != x.shape()) {
+        throw std::runtime_error("apply_rope_full expects x/out shape [N, D]");
+    }
+    if (cos_table.shape().size() != 2 || sin_table.shape() != cos_table.shape()) {
+        throw std::runtime_error("apply_rope_full cos/sin must have shape [T, D/2]");
+    }
+
+    const int64_t N = x.shape()[0];
+    const int64_t D = x.shape()[1];
+    if (D <= 0 || D % 2 != 0) throw std::runtime_error("apply_rope_full D must be positive and even");
+    const int64_t Half = D / 2;
+    if (cos_table.shape()[1] != Half) throw std::runtime_error("apply_rope_full table width mismatch");
+    if (static_cast<int64_t>(row_to_t.size()) != N) throw std::runtime_error("apply_rope_full row_to_t size mismatch");
+    for (int32_t t : row_to_t) {
+        if (t < 0 || t >= cos_table.shape()[0]) throw std::runtime_error("apply_rope_full row_to_t out of range");
+    }
+
+    Tensor x1({N, Half}, DType::Float16); x1.allocate();
+    Tensor x2({N, Half}, DType::Float16); x2.allocate();
+    Tensor cos_e({N, Half}, DType::Float16); cos_e.allocate();
+    Tensor sin_e({N, Half}, DType::Float16); sin_e.allocate();
+    Tensor a({N, Half}, DType::Float16); a.allocate();
+    Tensor b({N, Half}, DType::Float16); b.allocate();
+    Tensor y1({N, Half}, DType::Float16); y1.allocate();
+    Tensor y2({N, Half}, DType::Float16); y2.allocate();
+
+    const size_t elem = dtype_size(DType::Float16);
+    const size_t row_bytes = static_cast<size_t>(D) * elem;
+    const size_t half_bytes = static_cast<size_t>(Half) * elem;
+    auto* x_base = static_cast<const uint8_t*>(x.data());
+    auto* cos_base = static_cast<const uint8_t*>(cos_table.data());
+    auto* sin_base = static_cast<const uint8_t*>(sin_table.data());
+    auto* out_base = static_cast<uint8_t*>(out.data());
+
+    for (int64_t n = 0; n < N; ++n) {
+        const uint8_t* x_row = x_base + static_cast<size_t>(n) * row_bytes;
+        check_acl(aclrtMemcpyAsync(static_cast<uint8_t*>(x1.data()) + static_cast<size_t>(n) * half_bytes,
+                                   half_bytes, x_row, half_bytes, ACL_MEMCPY_DEVICE_TO_DEVICE, stream),
+                  "apply_rope_full copy x1");
+        check_acl(aclrtMemcpyAsync(static_cast<uint8_t*>(x2.data()) + static_cast<size_t>(n) * half_bytes,
+                                   half_bytes, x_row + half_bytes, half_bytes, ACL_MEMCPY_DEVICE_TO_DEVICE, stream),
+                  "apply_rope_full copy x2");
+        const int64_t t = row_to_t[n];
+        check_acl(aclrtMemcpyAsync(static_cast<uint8_t*>(cos_e.data()) + static_cast<size_t>(n) * half_bytes,
+                                   half_bytes,
+                                   cos_base + static_cast<size_t>(t) * half_bytes,
+                                   half_bytes, ACL_MEMCPY_DEVICE_TO_DEVICE, stream),
+                  "apply_rope_full copy cos");
+        check_acl(aclrtMemcpyAsync(static_cast<uint8_t*>(sin_e.data()) + static_cast<size_t>(n) * half_bytes,
+                                   half_bytes,
+                                   sin_base + static_cast<size_t>(t) * half_bytes,
+                                   half_bytes, ACL_MEMCPY_DEVICE_TO_DEVICE, stream),
+                  "apply_rope_full copy sin");
+    }
+    check_acl(aclrtSynchronizeStream(stream), "apply_rope_full gather sync");
+
+    mul(x1, cos_e, a, stream);
+    mul(x2, sin_e, b, stream);
+    sub(a, b, y1, stream);
+    mul(x2, cos_e, a, stream);
+    mul(x1, sin_e, b, stream);
+    add(a, b, y2, stream);
+
+    for (int64_t n = 0; n < N; ++n) {
+        uint8_t* o_row = out_base + static_cast<size_t>(n) * row_bytes;
+        check_acl(aclrtMemcpyAsync(o_row, half_bytes,
+                                   static_cast<uint8_t*>(y1.data()) + static_cast<size_t>(n) * half_bytes,
+                                   half_bytes, ACL_MEMCPY_DEVICE_TO_DEVICE, stream),
+                  "apply_rope_full scatter y1");
+        check_acl(aclrtMemcpyAsync(o_row + half_bytes, half_bytes,
+                                   static_cast<uint8_t*>(y2.data()) + static_cast<size_t>(n) * half_bytes,
+                                   half_bytes, ACL_MEMCPY_DEVICE_TO_DEVICE, stream),
+                  "apply_rope_full scatter y2");
+    }
+    check_acl(aclrtSynchronizeStream(stream), "apply_rope_full scatter sync");
 }
 
 }  // namespace hy_mt2

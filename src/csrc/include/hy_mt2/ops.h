@@ -19,8 +19,10 @@ void matmul_b_transposed(const Tensor& a, const Tensor& b, Tensor& out, aclrtStr
 void argmax_last_dim(const Tensor& self, Tensor& out, aclrtStream stream);
 
 void add(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream stream);
+void sub(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream stream);
 void mul(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream stream);
 void silu(const Tensor& self, Tensor& out, aclrtStream stream);
+void sigmoid(const Tensor& self, Tensor& out, aclrtStream stream);
 void softmax_last_dim(const Tensor& self, Tensor& out, aclrtStream stream);
 void rms_norm(const Tensor& x, const Tensor& gamma, Tensor& out, double epsilon, aclrtStream stream);
 void cast(const Tensor& self, Tensor& out, aclrtStream stream);
@@ -29,5 +31,16 @@ void batch_matmul(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream str
 void permute(const Tensor& self, const std::vector<int64_t>& dims, Tensor& out, aclrtStream stream);
 void muls(const Tensor& self, float scalar, Tensor& out, aclrtStream stream);
 void mean(const Tensor& self, const std::vector<int64_t>& dims, bool keep_dim, Tensor& out, aclrtStream stream);
+
+// Full rotary positional embedding. x [N, head_dim] fp16; cos/sin tables
+// [T, head_dim/2] fp16; row_to_t[n] maps row n to its absolute position.
+// The rotation pairs elements (i, i+head_dim/2) — i.e. "half rotate" not
+// "interleaved pairs". Matches Llama / Hy-MT2 RoPE convention.
+void apply_rope_full(const Tensor& x,
+                     const Tensor& cos_table,
+                     const Tensor& sin_table,
+                     const std::vector<int32_t>& row_to_t,
+                     Tensor& out,
+                     aclrtStream stream);
 
 }  // namespace hy_mt2

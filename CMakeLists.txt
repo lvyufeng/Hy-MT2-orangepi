@@ -48,6 +48,8 @@ add_library(hy_mt2_engine
   src/csrc/lib/weights.cpp
   src/csrc/lib/tokenizer.cpp
   src/csrc/lib/ops.cpp
+  src/csrc/lib/decoder_layer.cpp
+  src/csrc/lib/language_model.cpp
 )
 
 target_include_directories(hy_mt2_engine PUBLIC

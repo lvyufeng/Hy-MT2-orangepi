@@ -8,10 +8,10 @@ the Ascend 310B4 NPU in the Orange Pi AIPro 20T board. **All compute runs
 on the NPU through a single C++ engine — the tokenizer is wrapped via
 [mlc-ai/tokenizers-cpp][tokcpp] (no Python on the hot path).**
 
-> 🚧 **Status (Phase 2)**: scaffold, NPU runtime smoke test,
+> 🚧 **Status (Phase 3)**: scaffold, NPU runtime smoke test,
 > safetensors loader, `tokenizers-cpp` wrapper, baseline public-aclnn ops,
-> and the custom_opp scaffold for cube matmul / RMSNorm / SwiGLU /
-> attention-step are in place. Decoder layers and the full LM land in Phase 3+.
+> custom_opp scaffold, Hy-MT2 decoder layer, and the 32-layer tied-embedding
+> language-model loop are in place. Translator CLI lands in Phase 4.
 
 This repo follows the same shape as my earlier
 [`lvyufeng/minicpm-v-4.6-orangepi`][minicpmv]; several infrastructure
@@ -34,7 +34,7 @@ attention step) are adapted from that work.
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   ```
 
-## Quickstart (Phase 1 scope — runtime + loader/tokenizer tests)
+## Quickstart (Phase 3 scope — runtime, ops, decoder, LM smoke tests)
 
 ```bash
 source scripts/set_env.sh
@@ -42,6 +42,9 @@ source scripts/set_env.sh
 
 ./build/test_smoke
 ./build/test_weights_load
+./build/test_ops_baseline
+./build/test_decoder_layer
+./build/test_language_model
 
 # Requires tokenizer.json. Either fetch the model or point to a local file:
 HY_MT2_TOKENIZER_JSON=/path/to/tokenizer.json ./build/test_tokenizer
@@ -54,6 +57,9 @@ Expected core outputs:
 [ok] Tensor H2D/D2H round-trip 4 fp16 values
 [ok] WeightsIndex parses metadata and loads BF16->FP16 tensors
 [ok] tokenizer loads Hy-MT2 tokenizer.json and encodes chat prompt
+[ok] baseline aclnn ops wrappers run on NPU
+[ok] decoder layer prefill/step synthetic residual path
+[ok] language model prefill/decode synthetic path
 ```
 
 ## Repository layout
@@ -78,7 +84,7 @@ Hy-MT2-orangepi/
 | 0 | Repo scaffold, AclContext + Tensor + smoke test | ✅ done |
 | 1 | safetensors loader (BF16→FP16 cast) + tokenizers-cpp wrapper | ✅ done |
 | 2 | Ops + custom AscendC kernels (cube matmul, RMSNorm, SwiGLU, attention-step scaffold; baseline public-aclnn wrappers) | ✅ done |
-| 3 | Hy-MT2 decoder layer + full language model (32 layers, GQA 16/4, tie embeddings) | |
+| 3 | Hy-MT2 decoder layer + full language model (32 layers, GQA 16/4, tie embeddings) | ✅ done |
 | 4 | `Translator` API + `hy_mt2_translate` CLI | |
 | 5 | Bench + first perf rounds (lm_head tiling, prefill/decode split) | |
 | 6 | W8A16 (aclnnQuantMatmulV3), IFA/RoPE aclnn shims, GGUF Q4_0 | |
