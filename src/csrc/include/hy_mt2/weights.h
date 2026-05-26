@@ -1,0 +1,42 @@
+#pragma once
+
+#include "hy_mt2/tensor.h"
+
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace hy_mt2 {
+
+struct TensorInfo {
+    DType dtype;
+    std::vector<int64_t> shape;
+    uint64_t data_begin;
+    uint64_t data_end;
+};
+
+class WeightsIndex {
+public:
+    explicit WeightsIndex(const std::string& safetensors_path);
+
+    const TensorInfo& at(const std::string& name) const;
+    bool contains(const std::string& name) const;
+    size_t size() const { return tensors_.size(); }
+    std::vector<std::string> names() const;
+
+    Tensor load_to_device(const std::string& name) const;
+    Tensor load_to_device_as(const std::string& name, DType target_dtype) const;
+
+private:
+    std::string path_;
+    std::vector<uint8_t> file_bytes_;
+    std::unordered_map<std::string, TensorInfo> tensors_;
+
+    void parse();
+};
+
+std::string default_model_dir();
+std::string default_safetensors_path();
+
+}  // namespace hy_mt2

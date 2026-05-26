@@ -8,10 +8,10 @@ the Ascend 310B4 NPU in the Orange Pi AIPro 20T board. **All compute runs
 on the NPU through a single C++ engine — the tokenizer is wrapped via
 [mlc-ai/tokenizers-cpp][tokcpp] (no Python on the hot path).**
 
-> 🚧 **Status (Phase 0)**: scaffolding only. The engine library compiles,
-> `AclContext` + `Tensor` round-trip on the NPU. Per-op kernels, decoder
-> layers, and the full LM land in Phase 1+. See
-> [docs/plan][plan-link] (not committed) for the phased roadmap.
+> 🚧 **Status (Phase 1)**: scaffold, NPU runtime smoke test,
+> safetensors metadata loader with BF16→FP16 device load, and
+> `tokenizers-cpp` wrapper are in place. Per-op kernels, decoder layers,
+> and the full LM land in Phase 2+.
 
 This repo follows the same shape as my earlier
 [`lvyufeng/minicpm-v-4.6-orangepi`][minicpmv]; several infrastructure
@@ -34,23 +34,26 @@ attention step) are adapted from that work.
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   ```
 
-## Quickstart (Phase 0 scope — scaffold smoke-test)
+## Quickstart (Phase 1 scope — runtime + loader/tokenizer tests)
 
 ```bash
-# 1) source env, build the engine + smoke test.
 source scripts/set_env.sh
 ./scripts/build.sh
 
-# 2) run the smoke test: allocates an fp16 tensor on the NPU and
-#    round-trips it through host memory.
 ./build/test_smoke
+./build/test_weights_load
+
+# Requires tokenizer.json. Either fetch the model or point to a local file:
+HY_MT2_TOKENIZER_JSON=/path/to/tokenizer.json ./build/test_tokenizer
 ```
 
-Expected output:
+Expected core outputs:
 
 ```
 [ok] AclContext on device 0
 [ok] Tensor H2D/D2H round-trip 4 fp16 values
+[ok] WeightsIndex parses metadata and loads BF16->FP16 tensors
+[ok] tokenizer loads Hy-MT2 tokenizer.json and encodes chat prompt
 ```
 
 ## Repository layout
@@ -73,7 +76,7 @@ Hy-MT2-orangepi/
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Repo scaffold, AclContext + Tensor + smoke test | ✅ done |
-| 1 | safetensors loader (BF16→FP16 cast) + tokenizers-cpp wrapper | |
+| 1 | safetensors loader (BF16→FP16 cast) + tokenizers-cpp wrapper | ✅ done |
 | 2 | Ops + custom AscendC kernels (cube matmul, RMSNorm, SwiGLU, attention-step, full RoPE, qk-norm) | |
 | 3 | Hy-MT2 decoder layer + full language model (32 layers, GQA 16/4, tie embeddings) | |
 | 4 | `Translator` API + `hy_mt2_translate` CLI | |
@@ -99,4 +102,3 @@ full terms, including the territory carve-out (excludes the EU).
 [hymt2]: https://huggingface.co/tencent/Hy-MT2-1.8B
 [tokcpp]: https://github.com/mlc-ai/tokenizers-cpp
 [minicpmv]: https://github.com/lvyufeng/minicpm-v-4.6-orangepi
-[plan-link]: #

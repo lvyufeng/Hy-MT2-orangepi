@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(hy_mt2_engine LANGUAGES CXX)
 
+include(FetchContent)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -23,9 +25,28 @@ set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
 add_compile_options(-O3 -ffast-math -march=armv8.2-a+fp16 -Wall -Wextra
                     -Wno-unused-parameter -Wno-missing-field-initializers)
 
+set(TOKENIZERS_CPP_TOOLCHAIN_DIR "${CMAKE_BINARY_DIR}/rust-toolchain-bin")
+file(MAKE_DIRECTORY "${TOKENIZERS_CPP_TOOLCHAIN_DIR}")
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink /usr/bin/gcc
+                "${TOKENIZERS_CPP_TOOLCHAIN_DIR}/aarch64-unknown-linux-gnu-gcc")
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink /usr/bin/g++
+                "${TOKENIZERS_CPP_TOOLCHAIN_DIR}/aarch64-unknown-linux-gnu-g++")
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink /usr/bin/ar
+                "${TOKENIZERS_CPP_TOOLCHAIN_DIR}/aarch64-unknown-linux-gnu-ar")
+set(TOOLCHAIN_DIR "${TOKENIZERS_CPP_TOOLCHAIN_DIR}" CACHE PATH "Rust cc-rs toolchain shim" FORCE)
+
+FetchContent_Declare(
+  tokenizers_cpp
+  GIT_REPOSITORY https://github.com/mlc-ai/tokenizers-cpp.git
+  GIT_TAG main
+)
+FetchContent_MakeAvailable(tokenizers_cpp)
+
 add_library(hy_mt2_engine
   src/csrc/lib/acl_context.cpp
   src/csrc/lib/tensor.cpp
+  src/csrc/lib/weights.cpp
+  src/csrc/lib/tokenizer.cpp
 )
 
 target_include_directories(hy_mt2_engine PUBLIC
@@ -50,6 +71,7 @@ target_link_libraries(hy_mt2_engine PUBLIC
   ascendcl
   nnopbase
   opapi
+  tokenizers_cpp
 )
 
 # Per-file test / bench targets — glob so adding tests/test_foo.cpp or
