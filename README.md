@@ -77,6 +77,7 @@ compatibility, but the current Hy-MT2 prompt only needs the target language.
 ```bash
 source scripts/set_env.sh
 ./build/bench_matmul_throughput --iters 20
+./build/bench_lm_head --iters 5
 ./build/bench_prefill --model ./Hy-MT2-1.8B --prompt-len 8 --iters 1
 ./build/bench_decode --model ./Hy-MT2-1.8B --prompt-len 8 --decode 30
 ```
@@ -102,8 +103,9 @@ N%128==0 through `MatmulCubeCustom`.
 | natural_or_cube | 16 | 2048 | 2048 | 0.67 | 200.09 |
 
 The decode projection/MLP M=1 shapes are now roughly 40-50x faster with the
-cube path. The remaining large-vocab lm_head path still needs dedicated tiling
-or quantization.
+cube path. The tied lm_head now runs as 15 cube chunks of 8192 columns;
+`bench_lm_head --iters 3` reports **37.67 ms** per greedy head pass, down from
+~351 ms for the earlier full-vocab aclnn matmul microbench path.
 
 ## Repository layout
 

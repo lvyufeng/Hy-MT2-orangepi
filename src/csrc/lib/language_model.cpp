@@ -289,14 +289,11 @@ int64_t lm_head_greedy(const Tensor& last_hidden_1xH,
     if (weights.final_norm_w.shape() != std::vector<int64_t>{cfg.hidden_size}) {
         throw std::runtime_error("lm_head_greedy final_norm shape mismatch");
     }
-    if (weights.embed.shape() != std::vector<int64_t>{cfg.vocab_size, cfg.hidden_size}) {
-        throw std::runtime_error("lm_head_greedy tied embedding shape mismatch");
-    }
+    if (weights.lm_head_chunks.empty()) throw std::runtime_error("lm_head_greedy missing lm_head chunks");
 
     Tensor normed({1, cfg.hidden_size}, DType::Float16); normed.allocate();
     rms_norm(last_hidden_1xH, weights.final_norm_w, normed, cfg.rms_epsilon, stream);
 
-    if (weights.lm_head_chunks.empty()) throw std::runtime_error("lm_head_greedy missing lm_head chunks");
     const int64_t chunk_vocab = weights.lm_head_chunks.front().weight.shape()[1];
     Tensor logits({1, chunk_vocab}, DType::Float16); logits.allocate();
     std::vector<uint16_t> logits_host(static_cast<size_t>(chunk_vocab));
