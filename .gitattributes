@@ -1,0 +1,7 @@
+# Ensure shell scripts keep LF endings so the AscendC build toolchain
+# (which is picky on Windows-CRLF) doesn't break.
+*.sh text eol=lf
+*.cpp text eol=lf
+*.h   text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf

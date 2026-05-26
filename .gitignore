@@ -1,0 +1,31 @@
+# Build artefacts
+build/
+build_out/
+custom_opp_install/
+*.o
+*.so
+*.a
+
+# Editor / OS scratch
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~
+
+# Python venv / caches sometimes co-located with the model dir
+__pycache__/
+*.pyc
+.env/
+venv/
+
+# Downloaded weights — too big to commit.
+Hy-MT2-1.8B/
+Hy-MT2-1.8B-*/
+
+# AscendC compiler scratch files
+*.log
+.cache/
+
+# Local config nobody should commit
+custom_opp_*.run
