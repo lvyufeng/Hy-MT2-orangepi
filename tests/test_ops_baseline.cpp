@@ -170,6 +170,40 @@ int main() {
     check_rope(ctx, 4);
     check_rope(ctx, 16);
 
+    if (hy_mt2::has_rms_norm128_custom()) {
+        for (int64_t N : {1, 4, 16}) {
+            constexpr int64_t D = 128;
+            std::vector<float> x_vals(static_cast<size_t>(N * D));
+            std::vector<float> gamma_vals(D);
+            for (size_t i = 0; i < x_vals.size(); ++i) x_vals[i] = static_cast<float>(static_cast<int>(i % 23) - 11) * 0.02f;
+            for (size_t i = 0; i < gamma_vals.size(); ++i) gamma_vals[i] = 0.5f + static_cast<float>(i % 5) * 0.05f;
+            auto x = make_fp16_tensor({N, D}, x_vals);
+            auto gamma_t = make_fp16_tensor({D}, gamma_vals);
+            hy_mt2::Tensor out({N, D}, hy_mt2::DType::Float16); out.allocate();
+            const double eps = 1e-5;
+            hy_mt2::rms_norm128_custom(x, gamma_t, eps, out, ctx.stream());
+            const auto got = read_fp16(out);
+            const auto x_host = read_fp16(x);
+            const auto g_host = read_fp16(gamma_t);
+            for (int64_t n = 0; n < N; ++n) {
+                double sumSq = 0.0;
+                for (int64_t i = 0; i < D; ++i) {
+                    const float v = x_host[static_cast<size_t>(n * D + i)];
+                    sumSq += static_cast<double>(v) * v;
+                }
+                const float invRms = static_cast<float>(1.0 / std::sqrt(sumSq / D + eps));
+                for (int64_t i = 0; i < D; ++i) {
+                    const float ref = x_host[static_cast<size_t>(n * D + i)] * invRms * g_host[static_cast<size_t>(i)];
+                    if (!close(got[static_cast<size_t>(n * D + i)], ref, 5e-3f)) {
+                        std::cerr << "rms_norm128 mismatch N=" << N << " row=" << n << " i=" << i << ": "
+                                  << got[static_cast<size_t>(n * D + i)] << " vs " << ref << '\n';
+                        std::exit(1);
+                    }
+                }
+            }
+        }
+    }
+
     std::cout << "[ok] baseline aclnn ops wrappers run on NPU\n";
     return 0;
 }

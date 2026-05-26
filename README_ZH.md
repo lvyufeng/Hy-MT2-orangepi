@@ -61,10 +61,10 @@ Orange Pi AIPro 8T 上当前 FP16 baseline：
 | bench | setting | result |
 |---|---|---:|
 | prefill | prompt_len=8 | 22.74 s · 0.35 tok/s |
-| decode | prompt_len=8, decode=30 | 631.02 ms/token · 1.58 tok/s |
+| decode | prompt_len=8, decode=30 | 585.94 ms/token · 1.71 tok/s |
 | lm_head | 15 × 8192 cube chunks | 37.67 ms/pass |
 
-custom cube 路径让常见 decode M=1 projection/MLP matmul 相比原 public-aclnn transposed-view 路径快约 40-50x，custom decode-attention 和 RoPE 路径把当前 30-token decode bench 提到约 1.58 tok/s。当前主要瓶颈还在 RMSNorm 的 launch 开销、临时 tensor 拷贝，以及 FP16 权重带宽。
+custom cube 路径让常见 decode M=1 projection/MLP matmul 相比原 public-aclnn transposed-view 路径快约 40-50x，custom decode-attention、RoPE、以及 head_dim=128 RMSNorm 路径把当前 30-token decode bench 提到约 1.71 tok/s。当前主要瓶颈还在 2048-hidden RMSNorm 的 launch 开销、临时 tensor 拷贝，以及 FP16 权重带宽。
 
 常用 benchmark：
 

@@ -329,8 +329,16 @@ void run_layer_core(const Tensor& hidden,
 
     Tensor q_normed({T * config.num_q_heads, config.head_dim}, DType::Float16); q_normed.allocate();
     Tensor k_normed({T * config.num_kv_heads, config.head_dim}, DType::Float16); k_normed.allocate();
-    rms_norm(q_heads, *weights.q_norm_weight, q_normed, config.rms_epsilon, stream);
-    rms_norm(k_heads, *weights.k_norm_weight, k_normed, config.rms_epsilon, stream);
+    const bool use_rms_custom = T == 1 && config.head_dim == 128 &&
+                                has_rms_norm128_custom() &&
+                                std::getenv("HY_MT2_DISABLE_RMS_NORM128_CUSTOM") == nullptr;
+    if (use_rms_custom) {
+        rms_norm128_custom(q_heads, *weights.q_norm_weight, config.rms_epsilon, q_normed, stream);
+        rms_norm128_custom(k_heads, *weights.k_norm_weight, config.rms_epsilon, k_normed, stream);
+    } else {
+        rms_norm(q_heads, *weights.q_norm_weight, q_normed, config.rms_epsilon, stream);
+        rms_norm(k_heads, *weights.k_norm_weight, k_normed, config.rms_epsilon, stream);
+    }
 
     std::vector<int32_t> q_row_to_t(static_cast<size_t>(T * config.num_q_heads));
     std::vector<int32_t> k_row_to_t(static_cast<size_t>(T * config.num_kv_heads));

@@ -44,6 +44,13 @@
 #define HY_MT2_HAS_ROPE_FULL_CUSTOM 0
 #endif
 
+#if __has_include(<aclnn_rms_norm128_custom.h>)
+#include <aclnn_rms_norm128_custom.h>
+#define HY_MT2_HAS_RMS_NORM128_CUSTOM 1
+#else
+#define HY_MT2_HAS_RMS_NORM128_CUSTOM 0
+#endif
+
 namespace hy_mt2 {
 namespace {
 
@@ -268,6 +275,49 @@ void attention_step_custom(const Tensor& query,
     (void)out;
     (void)stream;
     throw std::runtime_error("attention_step_custom is not available in this build");
+#endif
+}
+
+bool has_rms_norm128_custom() {
+    return HY_MT2_HAS_RMS_NORM128_CUSTOM != 0;
+}
+
+void rms_norm128_custom(const Tensor& x,
+                        const Tensor& gamma,
+                        double epsilon,
+                        Tensor& out,
+                        aclrtStream stream) {
+#if HY_MT2_HAS_RMS_NORM128_CUSTOM
+    if (x.dtype() != DType::Float16 || gamma.dtype() != DType::Float16 || out.dtype() != DType::Float16) {
+        throw std::runtime_error("rms_norm128_custom requires fp16 tensors");
+    }
+    if (x.shape().size() != 2 || out.shape() != x.shape()) {
+        throw std::runtime_error("rms_norm128_custom expects 2D x/out with matching shape");
+    }
+    if (x.shape()[1] != 128 || gamma.shape() != std::vector<int64_t>{128}) {
+        throw std::runtime_error("rms_norm128_custom only supports head_dim=128");
+    }
+
+    AclTensorHandle hx, hg, ho;
+    make_acl_tensor(x, hx);
+    make_acl_tensor(gamma, hg);
+    make_acl_tensor(out, ho);
+    uint64_t ws_size = 0;
+    aclOpExecutor* executor = nullptr;
+    auto ret = aclnnRmsNorm128CustomGetWorkspaceSize(hx.tensor, hg.tensor,
+                                                     static_cast<float>(epsilon), ho.tensor,
+                                                     &ws_size, &executor);
+    if (ret != 0) {
+        throw std::runtime_error("aclnnRmsNorm128CustomGetWorkspaceSize failed: " + std::to_string(ret));
+    }
+    run_op("aclnnRmsNorm128Custom", ws_size, executor, stream, aclnnRmsNorm128Custom);
+#else
+    (void)x;
+    (void)gamma;
+    (void)epsilon;
+    (void)out;
+    (void)stream;
+    throw std::runtime_error("rms_norm128_custom is not available in this build");
 #endif
 }
 
