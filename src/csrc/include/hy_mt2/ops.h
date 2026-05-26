@@ -17,6 +17,16 @@ void embedding_lookup(const Tensor& weight,
 void matmul(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream stream);
 void matmul_b_transposed(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream stream);
 void matmul_b_natural(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream stream);
+bool has_attention_step_custom();
+void attention_step_custom(const Tensor& query,
+                           const Tensor& k_cache,
+                           const Tensor& v_cache,
+                           int64_t context,
+                           int64_t num_q_heads,
+                           int64_t num_kv_heads,
+                           float scale,
+                           Tensor& out,
+                           aclrtStream stream);
 void argmax_last_dim(const Tensor& self, Tensor& out, aclrtStream stream);
 
 void add(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream stream);

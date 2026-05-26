@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -262,6 +263,14 @@ void run_step_attention(const Tensor& q_rope,
                         const DecoderLayerConfig& c,
                         Tensor& attn_out,
                         aclrtStream stream) {
+    const float scale = 1.0f / std::sqrt(static_cast<float>(c.head_dim));
+    if (has_attention_step_custom() && (c.head_dim % 16) == 0 &&
+        std::getenv("HY_MT2_DISABLE_ATTENTION_STEP_CUSTOM") == nullptr) {
+        attention_step_custom(q_rope, cache.k_cache, cache.v_cache, context,
+                              c.num_q_heads, c.num_kv_heads, scale, attn_out, stream);
+        return;
+    }
+
     const int64_t q_per_kv = c.num_q_heads / c.num_kv_heads;
     Tensor q_seq({1, c.head_dim}, DType::Float16); q_seq.allocate();
     Tensor k_seq({context, c.head_dim}, DType::Float16); k_seq.allocate();
@@ -270,7 +279,6 @@ void run_step_attention(const Tensor& q_rope,
     Tensor scaled_scores({1, context}, DType::Float16); scaled_scores.allocate();
     Tensor probs({1, context}, DType::Float16); probs.allocate();
     Tensor ctx_seq({1, c.head_dim}, DType::Float16); ctx_seq.allocate();
-    const float scale = 1.0f / std::sqrt(static_cast<float>(c.head_dim));
 
     for (int64_t qh = 0; qh < c.num_q_heads; ++qh) {
         const int64_t kvh = qh / q_per_kv;

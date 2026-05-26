@@ -29,6 +29,13 @@
 #define HY_MT2_HAS_MATMUL_CUBE_CUSTOM 0
 #endif
 
+#if __has_include(<aclnn_attention_step_custom.h>)
+#include <aclnn_attention_step_custom.h>
+#define HY_MT2_HAS_ATTENTION_STEP_CUSTOM 1
+#else
+#define HY_MT2_HAS_ATTENTION_STEP_CUSTOM 0
+#endif
+
 namespace hy_mt2 {
 namespace {
 
@@ -188,6 +195,72 @@ void matmul_b_natural(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream
     }
 #endif
     matmul(a, b, out, stream);
+}
+
+bool has_attention_step_custom() {
+    return HY_MT2_HAS_ATTENTION_STEP_CUSTOM != 0;
+}
+
+void attention_step_custom(const Tensor& query,
+                           const Tensor& k_cache,
+                           const Tensor& v_cache,
+                           int64_t context,
+                           int64_t num_q_heads,
+                           int64_t num_kv_heads,
+                           float scale,
+                           Tensor& out,
+                           aclrtStream stream) {
+#if HY_MT2_HAS_ATTENTION_STEP_CUSTOM
+    if (query.dtype() != DType::Float16 || k_cache.dtype() != DType::Float16 ||
+        v_cache.dtype() != DType::Float16 || out.dtype() != DType::Float16) {
+        throw std::runtime_error("attention_step_custom requires fp16 tensors");
+    }
+    if (query.shape().size() != 2 || out.shape().size() != 2 ||
+        k_cache.shape().size() != 2 || v_cache.shape().size() != 2) {
+        throw std::runtime_error("attention_step_custom tensors must be 2D");
+    }
+    if (context <= 0 || context > 8192) throw std::runtime_error("attention_step_custom context out of range");
+    if (num_q_heads <= 0 || num_kv_heads <= 0 || (num_q_heads % num_kv_heads) != 0) {
+        throw std::runtime_error("attention_step_custom invalid head counts");
+    }
+    const int64_t total_q = static_cast<int64_t>(query.numel());
+    if (total_q <= 0 || (total_q % num_q_heads) != 0) {
+        throw std::runtime_error("attention_step_custom query/head mismatch");
+    }
+    const int64_t head_dim = total_q / num_q_heads;
+    if ((head_dim % 16) != 0) throw std::runtime_error("attention_step_custom head_dim must be 16-aligned");
+    if (out.numel() != static_cast<size_t>(total_q) || k_cache.shape()[0] < context || v_cache.shape()[0] < context ||
+        k_cache.shape() != v_cache.shape() || k_cache.shape()[1] != num_kv_heads * head_dim) {
+        throw std::runtime_error("attention_step_custom cache/out shape mismatch");
+    }
+
+    AclTensorHandle hq, hk, hv, ho;
+    make_acl_tensor(query, hq);
+    make_acl_tensor(k_cache, hk);
+    make_acl_tensor(v_cache, hv);
+    make_acl_tensor(out, ho);
+    uint64_t ws_size = 0;
+    aclOpExecutor* executor = nullptr;
+    auto ret = aclnnAttentionStepCustomGetWorkspaceSize(hq.tensor, hk.tensor, hv.tensor,
+                                                        context, num_q_heads, num_kv_heads,
+                                                        static_cast<double>(scale), ho.tensor,
+                                                        &ws_size, &executor);
+    if (ret != 0) {
+        throw std::runtime_error("aclnnAttentionStepCustomGetWorkspaceSize failed: " + std::to_string(ret));
+    }
+    run_op("aclnnAttentionStepCustom", ws_size, executor, stream, aclnnAttentionStepCustom);
+#else
+    (void)query;
+    (void)k_cache;
+    (void)v_cache;
+    (void)context;
+    (void)num_q_heads;
+    (void)num_kv_heads;
+    (void)scale;
+    (void)out;
+    (void)stream;
+    throw std::runtime_error("attention_step_custom is not available in this build");
+#endif
 }
 
 void argmax_last_dim(const Tensor& self, Tensor& out, aclrtStream stream) {

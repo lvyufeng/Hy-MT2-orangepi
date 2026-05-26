@@ -1,7 +1,9 @@
 #include "hy_mt2/acl_context.h"
 #include "hy_mt2/decoder_layer.h"
+#include "hy_mt2/ops.h"
 #include "hy_mt2/tensor.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -105,6 +107,64 @@ int main() {
             std::cerr << "decoder prefill residual mismatch at " << i << ": "
                       << prefill_out[i] << " vs " << hidden_out[i] << '\n';
             return 1;
+        }
+    }
+
+    if (hy_mt2::has_attention_step_custom()) {
+        constexpr int64_t num_q_heads = 2;
+        constexpr int64_t num_kv_heads = 1;
+        constexpr int64_t head_dim = 128;
+        constexpr int64_t context = 3;
+        constexpr int64_t max_seq = 4;
+        std::vector<float> q_vals(static_cast<size_t>(num_q_heads * head_dim));
+        std::vector<float> k_vals(static_cast<size_t>(max_seq * num_kv_heads * head_dim), 0.0f);
+        std::vector<float> v_vals(static_cast<size_t>(max_seq * num_kv_heads * head_dim), 0.0f);
+        for (size_t i = 0; i < q_vals.size(); ++i) q_vals[i] = static_cast<float>(static_cast<int>(i % 17) - 8) * 0.01f;
+        for (size_t i = 0; i < k_vals.size(); ++i) k_vals[i] = static_cast<float>(static_cast<int>(i % 13) - 6) * 0.015f;
+        for (size_t i = 0; i < v_vals.size(); ++i) v_vals[i] = static_cast<float>(static_cast<int>(i % 11) - 5) * 0.02f;
+        auto q = make_tensor({num_q_heads, head_dim}, q_vals);
+        auto k_cache = make_tensor({max_seq, num_kv_heads * head_dim}, k_vals);
+        auto v_cache = make_tensor({max_seq, num_kv_heads * head_dim}, v_vals);
+        hy_mt2::Tensor custom_out({num_q_heads, head_dim}, hy_mt2::DType::Float16); custom_out.allocate();
+        const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+        hy_mt2::attention_step_custom(q, k_cache, v_cache, context, num_q_heads, num_kv_heads,
+                                      scale, custom_out, ctx.stream());
+        const auto q_host = read_fp16(q);
+        const auto k_host = read_fp16(k_cache);
+        const auto v_host = read_fp16(v_cache);
+        std::vector<float> ref(static_cast<size_t>(num_q_heads * head_dim), 0.0f);
+        for (int64_t qh = 0; qh < num_q_heads; ++qh) {
+            std::vector<float> scores(static_cast<size_t>(context));
+            float max_score = -1.0e30f;
+            for (int64_t t = 0; t < context; ++t) {
+                float dot = 0.0f;
+                for (int64_t d = 0; d < head_dim; ++d) {
+                    dot += q_host[static_cast<size_t>(qh * head_dim + d)] *
+                           k_host[static_cast<size_t>(t * head_dim + d)];
+                }
+                scores[static_cast<size_t>(t)] = dot * scale;
+                max_score = std::max(max_score, scores[static_cast<size_t>(t)]);
+            }
+            float sum = 0.0f;
+            for (float& score : scores) {
+                score = std::exp(score - max_score);
+                sum += score;
+            }
+            for (int64_t t = 0; t < context; ++t) {
+                const float p = scores[static_cast<size_t>(t)] / sum;
+                for (int64_t d = 0; d < head_dim; ++d) {
+                    ref[static_cast<size_t>(qh * head_dim + d)] +=
+                        p * v_host[static_cast<size_t>(t * head_dim + d)];
+                }
+            }
+        }
+        const auto custom = read_fp16(custom_out);
+        for (size_t i = 0; i < custom.size(); ++i) {
+            if (std::fabs(custom[i] - ref[i]) > 5e-3f) {
+                std::cerr << "attention custom mismatch at " << i << ": "
+                          << custom[i] << " vs " << ref[i] << '\n';
+                return 1;
+            }
         }
     }
 
