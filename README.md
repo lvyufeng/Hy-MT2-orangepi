@@ -8,10 +8,11 @@ the Ascend 310B4 NPU in the Orange Pi AIPro 20T board. **All compute runs
 on the NPU through a single C++ engine — the tokenizer is wrapped via
 [mlc-ai/tokenizers-cpp][tokcpp] (no Python on the hot path).**
 
-> 🚧 **Status (Phase 3)**: scaffold, NPU runtime smoke test,
+> 🚧 **Status (Phase 4)**: scaffold, NPU runtime smoke test,
 > safetensors loader, `tokenizers-cpp` wrapper, baseline public-aclnn ops,
-> custom_opp scaffold, Hy-MT2 decoder layer, and the 32-layer tied-embedding
-> language-model loop are in place. Translator CLI lands in Phase 4.
+> custom_opp scaffold, Hy-MT2 decoder layer, 32-layer tied-embedding
+> language-model loop, `libhy_mt2.so`, `Translator`, and `hy_mt2_translate`
+> are in place. Bench/perf rounds land in Phase 5.
 
 This repo follows the same shape as my earlier
 [`lvyufeng/minicpm-v-4.6-orangepi`][minicpmv]; several infrastructure
@@ -62,6 +63,16 @@ Expected core outputs:
 [ok] language model prefill/decode synthetic path
 ```
 
+## CLI
+
+```bash
+source scripts/set_env.sh
+./build/hy_mt2_translate --model ./Hy-MT2-1.8B --tgt English --max-new 256 --stream
+```
+
+Input is one source sentence per stdin line. `--src` is accepted for CLI
+compatibility, but the current Hy-MT2 prompt only needs the target language.
+
 ## Repository layout
 
 ```
@@ -85,7 +96,7 @@ Hy-MT2-orangepi/
 | 1 | safetensors loader (BF16→FP16 cast) + tokenizers-cpp wrapper | ✅ done |
 | 2 | Ops + custom AscendC kernels (cube matmul, RMSNorm, SwiGLU, attention-step scaffold; baseline public-aclnn wrappers) | ✅ done |
 | 3 | Hy-MT2 decoder layer + full language model (32 layers, GQA 16/4, tie embeddings) | ✅ done |
-| 4 | `Translator` API + `hy_mt2_translate` CLI | |
+| 4 | `Translator` API + `hy_mt2_translate` CLI | ✅ done |
 | 5 | Bench + first perf rounds (lm_head tiling, prefill/decode split) | |
 | 6 | W8A16 (aclnnQuantMatmulV3), IFA/RoPE aclnn shims, GGUF Q4_0 | |
 

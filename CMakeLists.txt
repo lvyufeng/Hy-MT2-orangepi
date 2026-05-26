@@ -42,7 +42,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tokenizers_cpp)
 
-add_library(hy_mt2_engine
+add_library(hy_mt2_engine SHARED
   src/csrc/lib/acl_context.cpp
   src/csrc/lib/tensor.cpp
   src/csrc/lib/weights.cpp
@@ -50,7 +50,9 @@ add_library(hy_mt2_engine
   src/csrc/lib/ops.cpp
   src/csrc/lib/decoder_layer.cpp
   src/csrc/lib/language_model.cpp
+  src/csrc/lib/translator.cpp
 )
+set_target_properties(hy_mt2_engine PROPERTIES OUTPUT_NAME hy_mt2)
 
 target_include_directories(hy_mt2_engine PUBLIC
   ${CMAKE_SOURCE_DIR}/src/csrc/include
