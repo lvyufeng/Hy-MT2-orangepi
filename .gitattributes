@@ -5,3 +5,6 @@
 *.h   text eol=lf
 *.cmake text eol=lf
 CMakeLists.txt text eol=lf
+# Vendored AscendC custom-op tooling from the CANN sample tree — keep its
+# whitespace as-is so future upstream pulls don't churn the diff.
+src/csrc/custom_ops/cmake/util/** -whitespace

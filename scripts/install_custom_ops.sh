@@ -18,22 +18,15 @@ if [[ ! -f "$CUSTOM_OPS_DIR/build.sh" ]]; then
     exit 0
 fi
 
-# The AscendC build script expects ASCEND_HOME_PATH (or ASCEND_AICPU_PATH /
-# BASE_LIBS_PATH). Source the CANN env script if available and the user
-# hasn't already exported it.
-if [[ -z "${ASCEND_HOME_PATH:-}" && -z "${ASCEND_AICPU_PATH:-}" && -z "${BASE_LIBS_PATH:-}" ]]; then
-    DEFAULT_CANN_ROOT="${HY_MT2_ASCEND_TOOLKIT_ROOT:-/usr/local/Ascend/cann-8.5.0/aarch64-linux}"
-    # The setenv.bash lives one directory up from the platform-specific
-    # subdir (i.e. at /usr/local/Ascend/cann-8.5.0/bin/setenv.bash on this
-    # install).
-    CANN_PARENT="$(dirname "$DEFAULT_CANN_ROOT")"
-    if [[ -f "$CANN_PARENT/bin/setenv.bash" ]]; then
-        # shellcheck disable=SC1090
-        source "$CANN_PARENT/bin/setenv.bash"
-    else
-        export ASCEND_HOME_PATH="$DEFAULT_CANN_ROOT"
-    fi
-fi
+# The Orange Pi image ships stale ASCEND_* variables pointing at the
+# non-existent ascend-toolkit/laster path, so force the known-good CANN root.
+DEFAULT_CANN_ROOT="${HY_MT2_CANN_ROOT:-/usr/local/Ascend/cann-8.5.0}"
+export ASCEND_HOME_PATH="$DEFAULT_CANN_ROOT"
+export ASCEND_AICPU_PATH="$DEFAULT_CANN_ROOT"
+export ASCEND_OPP_PATH="$DEFAULT_CANN_ROOT/opp"
+export BASE_LIBS_PATH="$DEFAULT_CANN_ROOT"
+export LD_LIBRARY_PATH="$DEFAULT_CANN_ROOT/lib64:$DEFAULT_CANN_ROOT/aarch64-linux/lib64:$DEFAULT_CANN_ROOT/aarch64-linux/devlib:${LD_LIBRARY_PATH:-}"
+export PATH="$DEFAULT_CANN_ROOT/bin:$DEFAULT_CANN_ROOT/compiler/ccec_compiler/bin:${PATH:-}"
 
 cd "$CUSTOM_OPS_DIR"
 ./build.sh

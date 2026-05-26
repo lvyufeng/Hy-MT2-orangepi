@@ -47,6 +47,7 @@ add_library(hy_mt2_engine
   src/csrc/lib/tensor.cpp
   src/csrc/lib/weights.cpp
   src/csrc/lib/tokenizer.cpp
+  src/csrc/lib/ops.cpp
 )
 
 target_include_directories(hy_mt2_engine PUBLIC

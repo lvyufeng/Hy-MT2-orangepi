@@ -8,10 +8,10 @@ the Ascend 310B4 NPU in the Orange Pi AIPro 20T board. **All compute runs
 on the NPU through a single C++ engine — the tokenizer is wrapped via
 [mlc-ai/tokenizers-cpp][tokcpp] (no Python on the hot path).**
 
-> 🚧 **Status (Phase 1)**: scaffold, NPU runtime smoke test,
-> safetensors metadata loader with BF16→FP16 device load, and
-> `tokenizers-cpp` wrapper are in place. Per-op kernels, decoder layers,
-> and the full LM land in Phase 2+.
+> 🚧 **Status (Phase 2)**: scaffold, NPU runtime smoke test,
+> safetensors loader, `tokenizers-cpp` wrapper, baseline public-aclnn ops,
+> and the custom_opp scaffold for cube matmul / RMSNorm / SwiGLU /
+> attention-step are in place. Decoder layers and the full LM land in Phase 3+.
 
 This repo follows the same shape as my earlier
 [`lvyufeng/minicpm-v-4.6-orangepi`][minicpmv]; several infrastructure
@@ -77,7 +77,7 @@ Hy-MT2-orangepi/
 |---|---|---|
 | 0 | Repo scaffold, AclContext + Tensor + smoke test | ✅ done |
 | 1 | safetensors loader (BF16→FP16 cast) + tokenizers-cpp wrapper | ✅ done |
-| 2 | Ops + custom AscendC kernels (cube matmul, RMSNorm, SwiGLU, attention-step, full RoPE, qk-norm) | |
+| 2 | Ops + custom AscendC kernels (cube matmul, RMSNorm, SwiGLU, attention-step scaffold; baseline public-aclnn wrappers) | ✅ done |
 | 3 | Hy-MT2 decoder layer + full language model (32 layers, GQA 16/4, tie embeddings) | |
 | 4 | `Translator` API + `hy_mt2_translate` CLI | |
 | 5 | Bench + first perf rounds (lm_head tiling, prefill/decode split) | |

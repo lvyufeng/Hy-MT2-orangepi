@@ -2,6 +2,7 @@
 build/
 build_out/
 custom_opp_install/
+src/csrc/custom_ops/build_out/
 *.o
 *.so
 *.a
