@@ -123,14 +123,14 @@ void copy_cache_head_to_seq(const Tensor& cache, int64_t head,
     check_acl(aclrtSynchronizeStream(stream), "copy_cache_head_to_seq sync");
 }
 
-bool matmul_weight_shape_ok(const Tensor* t, int64_t out_dim, int64_t in_dim) {
-    return t->shape() == std::vector<int64_t>{out_dim, in_dim};
+bool matmul_weight_shape_ok(const Tensor* t, int64_t in_dim, int64_t out_dim) {
+    return t->shape() == std::vector<int64_t>{in_dim, out_dim};
 }
 
 int64_t infer_intermediate(const Tensor& gate_proj_weight, int64_t hidden) {
     const auto& s = gate_proj_weight.shape();
-    if (s.size() != 2 || s[1] != hidden) throw std::runtime_error("decoder gate_proj shape mismatch");
-    return s[0];
+    if (s.size() != 2 || s[0] != hidden) throw std::runtime_error("decoder gate_proj shape mismatch");
+    return s[1];
 }
 
 void validate_shapes(const Tensor& hidden,
@@ -166,14 +166,14 @@ void validate_shapes(const Tensor& hidden,
     const int64_t intermediate = infer_intermediate(*w.gate_proj_weight, hidden_size);
     if (w.input_norm_weight->shape() != std::vector<int64_t>{hidden_size} ||
         w.post_attention_norm_weight->shape() != std::vector<int64_t>{hidden_size} ||
-        !matmul_weight_shape_ok(w.q_proj_weight, q_dim, hidden_size) ||
-        !matmul_weight_shape_ok(w.k_proj_weight, kv_dim, hidden_size) ||
-        !matmul_weight_shape_ok(w.v_proj_weight, kv_dim, hidden_size) ||
-        !matmul_weight_shape_ok(w.o_proj_weight, hidden_size, q_dim) ||
+        !matmul_weight_shape_ok(w.q_proj_weight, hidden_size, q_dim) ||
+        !matmul_weight_shape_ok(w.k_proj_weight, hidden_size, kv_dim) ||
+        !matmul_weight_shape_ok(w.v_proj_weight, hidden_size, kv_dim) ||
+        !matmul_weight_shape_ok(w.o_proj_weight, q_dim, hidden_size) ||
         w.q_norm_weight->shape() != std::vector<int64_t>{c.head_dim} ||
         w.k_norm_weight->shape() != std::vector<int64_t>{c.head_dim} ||
-        !matmul_weight_shape_ok(w.up_proj_weight, intermediate, hidden_size) ||
-        !matmul_weight_shape_ok(w.down_proj_weight, hidden_size, intermediate)) {
+        !matmul_weight_shape_ok(w.up_proj_weight, hidden_size, intermediate) ||
+        !matmul_weight_shape_ok(w.down_proj_weight, intermediate, hidden_size)) {
         throw std::runtime_error("decoder layer weight shape mismatch");
     }
 }
@@ -300,7 +300,7 @@ void run_layer_core(const Tensor& hidden,
     const int64_t hidden_size = hidden.shape()[1];
     const int64_t q_dim = config.num_q_heads * config.head_dim;
     const int64_t kv_dim = config.num_kv_heads * config.head_dim;
-    const int64_t intermediate = weights.gate_proj_weight->shape()[0];
+    const int64_t intermediate = weights.gate_proj_weight->shape()[1];
     if (static_cast<int64_t>(row_to_t.size()) != T) throw std::runtime_error("decoder row_to_t size mismatch");
     if (cache.k_cache.shape()[1] != kv_dim || cache.v_cache.shape() != cache.k_cache.shape() ||
         cache_offset + T > cache.k_cache.shape()[0]) {
@@ -313,9 +313,9 @@ void run_layer_core(const Tensor& hidden,
     Tensor q_full({T, q_dim}, DType::Float16); q_full.allocate();
     Tensor k_full({T, kv_dim}, DType::Float16); k_full.allocate();
     Tensor v_full({T, kv_dim}, DType::Float16); v_full.allocate();
-    matmul_b_transposed(normed, *weights.q_proj_weight, q_full, stream);
-    matmul_b_transposed(normed, *weights.k_proj_weight, k_full, stream);
-    matmul_b_transposed(normed, *weights.v_proj_weight, v_full, stream);
+    matmul_b_natural(normed, *weights.q_proj_weight, q_full, stream);
+    matmul_b_natural(normed, *weights.k_proj_weight, k_full, stream);
+    matmul_b_natural(normed, *weights.v_proj_weight, v_full, stream);
 
     Tensor q_heads({T * config.num_q_heads, config.head_dim}, DType::Float16); q_heads.allocate();
     Tensor k_heads({T * config.num_kv_heads, config.head_dim}, DType::Float16); k_heads.allocate();
@@ -349,7 +349,7 @@ void run_layer_core(const Tensor& hidden,
     }
 
     Tensor attn_proj({T, hidden_size}, DType::Float16); attn_proj.allocate();
-    matmul_b_transposed(attn_out, *weights.o_proj_weight, attn_proj, stream);
+    matmul_b_natural(attn_out, *weights.o_proj_weight, attn_proj, stream);
 
     Tensor after_attn({T, hidden_size}, DType::Float16); after_attn.allocate();
     add(hidden, attn_proj, after_attn, stream);
@@ -362,11 +362,11 @@ void run_layer_core(const Tensor& hidden,
     Tensor gate_act({T, intermediate}, DType::Float16); gate_act.allocate();
     Tensor gated({T, intermediate}, DType::Float16); gated.allocate();
     Tensor mlp_out({T, hidden_size}, DType::Float16); mlp_out.allocate();
-    matmul_b_transposed(mlp_in, *weights.gate_proj_weight, gate, stream);
-    matmul_b_transposed(mlp_in, *weights.up_proj_weight, up, stream);
+    matmul_b_natural(mlp_in, *weights.gate_proj_weight, gate, stream);
+    matmul_b_natural(mlp_in, *weights.up_proj_weight, up, stream);
     silu(gate, gate_act, stream);
     mul(gate_act, up, gated, stream);
-    matmul_b_transposed(gated, *weights.down_proj_weight, mlp_out, stream);
+    matmul_b_natural(gated, *weights.down_proj_weight, mlp_out, stream);
     add(after_attn, mlp_out, out, stream);
 }
 

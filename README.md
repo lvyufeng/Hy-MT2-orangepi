@@ -81,20 +81,29 @@ source scripts/set_env.sh
 ./build/bench_decode --model ./Hy-MT2-1.8B --prompt-len 8 --decode 30
 ```
 
-Current public-aclnn matmul microbench snapshot on this Orange Pi AIPro 20T
-(`--iters 1`, fp16 tensors):
+Current matmul microbench snapshot on this Orange Pi AIPro 20T (`--iters 1`,
+fp16 tensors). `aclnn_bt` is the original public-aclnn transposed-view path;
+`natural_or_cube` uses pre-transposed `[K,N]` weights and routes M=1, N<=16384,
+N%128==0 through `MatmulCubeCustom`.
 
-| M | N | K | ms/iter | GFLOP/s |
-|---:|---:|---:|---:|---:|
-| 1 | 2048 | 2048 | 26.46 | 0.32 |
-| 1 | 512 | 2048 | 6.80 | 0.31 |
-| 1 | 6144 | 2048 | 80.77 | 0.31 |
-| 1 | 2048 | 6144 | 79.63 | 0.32 |
-| 1 | 120818 | 2048 | 364.07 | 1.36 |
-| 16 | 2048 | 2048 | 0.69 | 194.01 |
+| path | M | N | K | ms/iter | GFLOP/s |
+|---|---:|---:|---:|---:|---:|
+| aclnn_bt | 1 | 2048 | 2048 | 27.14 | 0.31 |
+| natural_or_cube | 1 | 2048 | 2048 | 0.64 | 13.08 |
+| aclnn_bt | 1 | 512 | 2048 | 7.23 | 0.29 |
+| natural_or_cube | 1 | 512 | 2048 | 0.16 | 12.84 |
+| aclnn_bt | 1 | 6144 | 2048 | 79.96 | 0.31 |
+| natural_or_cube | 1 | 6144 | 2048 | 1.69 | 14.88 |
+| aclnn_bt | 1 | 2048 | 6144 | 80.94 | 0.31 |
+| natural_or_cube | 1 | 2048 | 6144 | 1.60 | 15.69 |
+| aclnn_bt | 1 | 120818 | 2048 | 362.20 | 1.37 |
+| natural_or_cube | 1 | 120818 | 2048 | 351.42 | 1.41 |
+| aclnn_bt | 16 | 2048 | 2048 | 0.71 | 188.61 |
+| natural_or_cube | 16 | 2048 | 2048 | 0.67 | 200.09 |
 
-These numbers confirm the decode hot path needs cube/custom-kernel routing for
-M=1 matmuls; the batched path is already much healthier.
+The decode projection/MLP M=1 shapes are now roughly 40-50x faster with the
+cube path. The remaining large-vocab lm_head path still needs dedicated tiling
+or quantization.
 
 ## Repository layout
 

@@ -60,19 +60,27 @@ int main(int argc, char** argv) {
     };
 
     hy_mt2::AclContext ctx(0);
-    std::cout << "M,N,K,iters,ms_per_iter,gflops\n";
+    std::cout << "path,M,N,K,iters,ms_per_iter,gflops\n";
     for (const auto& s : shapes) {
         auto a = filled({s.m, s.k}, 0.001f);
-        auto b = filled({s.n, s.k}, 0.002f);
+        auto b_transposed = filled({s.n, s.k}, 0.002f);
+        auto b_natural = filled({s.k, s.n}, 0.002f);
         hy_mt2::Tensor out({s.m, s.n}, hy_mt2::DType::Float16); out.allocate();
-        hy_mt2::matmul_b_transposed(a, b, out, ctx.stream());
-        const auto start = std::chrono::steady_clock::now();
-        for (int i = 0; i < iters; ++i) hy_mt2::matmul_b_transposed(a, b, out, ctx.stream());
-        const auto end = std::chrono::steady_clock::now();
-        const double ms = std::chrono::duration<double, std::milli>(end - start).count() / iters;
         const double flops = 2.0 * static_cast<double>(s.m) * s.n * s.k;
-        const double gflops = flops / (ms * 1.0e6);
-        std::cout << s.m << ',' << s.n << ',' << s.k << ',' << iters << ',' << ms << ',' << gflops << '\n';
+
+        hy_mt2::matmul_b_transposed(a, b_transposed, out, ctx.stream());
+        auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < iters; ++i) hy_mt2::matmul_b_transposed(a, b_transposed, out, ctx.stream());
+        auto end = std::chrono::steady_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(end - start).count() / iters;
+        std::cout << "aclnn_bt," << s.m << ',' << s.n << ',' << s.k << ',' << iters << ',' << ms << ',' << (flops / (ms * 1.0e6)) << '\n';
+
+        hy_mt2::matmul_b_natural(a, b_natural, out, ctx.stream());
+        start = std::chrono::steady_clock::now();
+        for (int i = 0; i < iters; ++i) hy_mt2::matmul_b_natural(a, b_natural, out, ctx.stream());
+        end = std::chrono::steady_clock::now();
+        ms = std::chrono::duration<double, std::milli>(end - start).count() / iters;
+        std::cout << "natural_or_cube," << s.m << ',' << s.n << ',' << s.k << ',' << iters << ',' << ms << ',' << (flops / (ms * 1.0e6)) << '\n';
     }
     return 0;
 }

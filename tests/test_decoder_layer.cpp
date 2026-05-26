@@ -77,14 +77,14 @@ int main() {
     auto input_norm = filled({4}, 1.0f);
     auto post_norm = filled({4}, 1.0f);
     auto q_w = filled({4, 4}, 0.0f);
-    auto k_w = filled({2, 4}, 0.0f);
-    auto v_w = filled({2, 4}, 0.0f);
+    auto k_w = filled({4, 2}, 0.0f);
+    auto v_w = filled({4, 2}, 0.0f);
     auto o_w = filled({4, 4}, 0.0f);
     auto q_norm = filled({2}, 1.0f);
     auto k_norm = filled({2}, 1.0f);
-    auto gate_w = filled({8, 4}, 0.0f);
-    auto up_w = filled({8, 4}, 0.0f);
-    auto down_w = filled({4, 8}, 0.0f);
+    auto gate_w = filled({4, 8}, 0.0f);
+    auto up_w = filled({4, 8}, 0.0f);
+    auto down_w = filled({8, 4}, 0.0f);
 
     const hy_mt2::DecoderLayerWeights w{
         &input_norm, &post_norm, &q_w, &k_w, &v_w, &o_w,

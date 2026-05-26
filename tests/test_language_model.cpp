@@ -39,14 +39,14 @@ hy_mt2::LayerWeights make_zero_layer() {
     layer.input_norm_w = filled({4}, 1.0f);
     layer.post_norm_w = filled({4}, 1.0f);
     layer.q_w = filled({4, 4}, 0.0f);
-    layer.k_w = filled({2, 4}, 0.0f);
-    layer.v_w = filled({2, 4}, 0.0f);
+    layer.k_w = filled({4, 2}, 0.0f);
+    layer.v_w = filled({4, 2}, 0.0f);
     layer.o_w = filled({4, 4}, 0.0f);
     layer.q_norm_w = filled({2}, 1.0f);
     layer.k_norm_w = filled({2}, 1.0f);
-    layer.gate_w = filled({8, 4}, 0.0f);
-    layer.up_w = filled({8, 4}, 0.0f);
-    layer.down_w = filled({4, 8}, 0.0f);
+    layer.gate_w = filled({4, 8}, 0.0f);
+    layer.up_w = filled({4, 8}, 0.0f);
+    layer.down_w = filled({8, 4}, 0.0f);
     return layer;
 }
 

@@ -22,6 +22,13 @@
 #include <aclnnop/aclnn_softmax.h>
 #include <aclnnop/aclnn_sub.h>
 
+#if __has_include(<aclnn_matmul_cube_custom.h>)
+#include <aclnn_matmul_cube_custom.h>
+#define HY_MT2_HAS_MATMUL_CUBE_CUSTOM 1
+#else
+#define HY_MT2_HAS_MATMUL_CUBE_CUSTOM 0
+#endif
+
 namespace hy_mt2 {
 namespace {
 
@@ -151,6 +158,36 @@ void matmul_b_transposed(const Tensor& a, const Tensor& b, Tensor& out, aclrtStr
     auto ret = aclnnMmGetWorkspaceSize(ha.tensor, hb.tensor, ho.tensor, kCubeMathType, &ws_size, &executor);
     if (ret != 0) throw std::runtime_error("aclnnMmGetWorkspaceSize B^T failed: " + std::to_string(ret));
     run_op("aclnnMm_Bt", ws_size, executor, stream, aclnnMm);
+}
+
+void matmul_b_natural(const Tensor& a, const Tensor& b, Tensor& out, aclrtStream stream) {
+    if (a.shape().size() != 2 || b.shape().size() != 2 || out.shape().size() != 2) {
+        throw std::runtime_error("matmul_b_natural tensors must be 2D");
+    }
+    const int64_t m = a.shape()[0];
+    const int64_t k = a.shape()[1];
+    const int64_t n = b.shape()[1];
+    if (b.shape()[0] != k || out.shape() != std::vector<int64_t>{m, n}) {
+        throw std::runtime_error("matmul_b_natural shape mismatch");
+    }
+#if HY_MT2_HAS_MATMUL_CUBE_CUSTOM
+    if (m == 1 && a.dtype() == DType::Float16 && b.dtype() == DType::Float16 && out.dtype() == DType::Float16 &&
+        n <= 16384 && (n % 128) == 0) {
+        AclTensorHandle ha, hb, ho;
+        make_acl_tensor(a, ha);
+        make_acl_tensor(b, hb);
+        make_acl_tensor(out, ho);
+        uint64_t ws_size = 0;
+        aclOpExecutor* executor = nullptr;
+        auto ret = aclnnMatmulCubeCustomGetWorkspaceSize(ha.tensor, hb.tensor, ho.tensor, &ws_size, &executor);
+        if (ret != 0) {
+            throw std::runtime_error("aclnnMatmulCubeCustomGetWorkspaceSize failed: " + std::to_string(ret));
+        }
+        run_op("aclnnMatmulCubeCustom", ws_size, executor, stream, aclnnMatmulCubeCustom);
+        return;
+    }
+#endif
+    matmul(a, b, out, stream);
 }
 
 void argmax_last_dim(const Tensor& self, Tensor& out, aclrtStream stream) {

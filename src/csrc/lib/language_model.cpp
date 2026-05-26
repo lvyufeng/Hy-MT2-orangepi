@@ -61,6 +61,29 @@ Tensor load_layer_weight(WeightsIndex& index, int64_t layer, const std::string& 
     return load_weight(index, "model.layers." + std::to_string(layer) + "." + suffix);
 }
 
+Tensor transpose_2d_device_to_device(const Tensor& src) {
+    if (src.shape().size() != 2 || src.dtype() != DType::Float16) {
+        throw std::runtime_error("transpose_2d_device_to_device expects a 2D fp16 tensor");
+    }
+    const int64_t rows = src.shape()[0];
+    const int64_t cols = src.shape()[1];
+    std::vector<uint16_t> host(static_cast<size_t>(rows) * cols);
+    src.copy_to_host(host.data(), host.size() * sizeof(uint16_t));
+    std::vector<uint16_t> transposed(static_cast<size_t>(rows) * cols);
+    for (int64_t r = 0; r < rows; ++r) {
+        for (int64_t c = 0; c < cols; ++c) {
+            transposed[static_cast<size_t>(c) * rows + r] = host[static_cast<size_t>(r) * cols + c];
+        }
+    }
+    Tensor dst({cols, rows}, DType::Float16);
+    dst.copy_from_host(transposed.data(), transposed.size() * sizeof(uint16_t));
+    return dst;
+}
+
+Tensor load_layer_weight_transposed(WeightsIndex& index, int64_t layer, const std::string& suffix) {
+    return transpose_2d_device_to_device(load_layer_weight(index, layer, suffix));
+}
+
 void copy_tensor(const Tensor& src, Tensor& dst, aclrtStream stream) {
     if (src.shape() != dst.shape() || src.dtype() != dst.dtype()) throw std::runtime_error("copy_tensor shape/dtype mismatch");
     check_acl(aclrtMemcpyAsync(dst.data(), dst.size_bytes(), src.data(), src.size_bytes(),
@@ -121,13 +144,16 @@ std::vector<LmHeadChunk> build_lm_head_chunks(const Tensor& embed, const Languag
     for (int64_t start = 0; start < cfg.vocab_size; start += kChunkVocab) {
         const int64_t valid = std::min<int64_t>(kChunkVocab, cfg.vocab_size - start);
         std::fill(chunk_host.begin(), chunk_host.end(), uint16_t{0});
-        std::copy_n(embed_host.begin() + static_cast<size_t>(start) * cfg.hidden_size,
-                    static_cast<size_t>(valid) * cfg.hidden_size,
-                    chunk_host.begin());
+        for (int64_t v = 0; v < valid; ++v) {
+            for (int64_t h = 0; h < cfg.hidden_size; ++h) {
+                chunk_host[static_cast<size_t>(h) * kChunkVocab + v] =
+                    embed_host[static_cast<size_t>(start + v) * cfg.hidden_size + h];
+            }
+        }
         LmHeadChunk chunk;
         chunk.start_vocab = start;
         chunk.valid_vocab = valid;
-        chunk.weight = Tensor({kChunkVocab, cfg.hidden_size}, DType::Float16);
+        chunk.weight = Tensor({cfg.hidden_size, kChunkVocab}, DType::Float16);
         chunk.weight.copy_from_host(chunk_host.data(), chunk_host.size() * sizeof(uint16_t));
         chunks.push_back(std::move(chunk));
     }
@@ -151,15 +177,15 @@ LanguageModelWeights load_language_model_weights(WeightsIndex& index,
         auto& lw = w.layers[static_cast<size_t>(layer)];
         lw.input_norm_w = load_layer_weight(index, layer, "input_layernorm.weight");
         lw.post_norm_w = load_layer_weight(index, layer, "post_attention_layernorm.weight");
-        lw.q_w = load_layer_weight(index, layer, "self_attn.q_proj.weight");
-        lw.k_w = load_layer_weight(index, layer, "self_attn.k_proj.weight");
-        lw.v_w = load_layer_weight(index, layer, "self_attn.v_proj.weight");
-        lw.o_w = load_layer_weight(index, layer, "self_attn.o_proj.weight");
+        lw.q_w = load_layer_weight_transposed(index, layer, "self_attn.q_proj.weight");
+        lw.k_w = load_layer_weight_transposed(index, layer, "self_attn.k_proj.weight");
+        lw.v_w = load_layer_weight_transposed(index, layer, "self_attn.v_proj.weight");
+        lw.o_w = load_layer_weight_transposed(index, layer, "self_attn.o_proj.weight");
         lw.q_norm_w = load_layer_weight(index, layer, "self_attn.q_norm.weight");
         lw.k_norm_w = load_layer_weight(index, layer, "self_attn.k_norm.weight");
-        lw.gate_w = load_layer_weight(index, layer, "mlp.gate_proj.weight");
-        lw.up_w = load_layer_weight(index, layer, "mlp.up_proj.weight");
-        lw.down_w = load_layer_weight(index, layer, "mlp.down_proj.weight");
+        lw.gate_w = load_layer_weight_transposed(index, layer, "mlp.gate_proj.weight");
+        lw.up_w = load_layer_weight_transposed(index, layer, "mlp.up_proj.weight");
+        lw.down_w = load_layer_weight_transposed(index, layer, "mlp.down_proj.weight");
     }
     w.lm_head_chunks = build_lm_head_chunks(w.embed, cfg);
     return w;
@@ -271,14 +297,14 @@ int64_t lm_head_greedy(const Tensor& last_hidden_1xH,
     rms_norm(last_hidden_1xH, weights.final_norm_w, normed, cfg.rms_epsilon, stream);
 
     if (weights.lm_head_chunks.empty()) throw std::runtime_error("lm_head_greedy missing lm_head chunks");
-    const int64_t chunk_vocab = weights.lm_head_chunks.front().weight.shape()[0];
+    const int64_t chunk_vocab = weights.lm_head_chunks.front().weight.shape()[1];
     Tensor logits({1, chunk_vocab}, DType::Float16); logits.allocate();
     std::vector<uint16_t> logits_host(static_cast<size_t>(chunk_vocab));
 
     int64_t best = 0;
     float best_logit = -std::numeric_limits<float>::infinity();
     for (const auto& chunk : weights.lm_head_chunks) {
-        matmul_b_transposed(normed, chunk.weight, logits, stream);
+        matmul_b_natural(normed, chunk.weight, logits, stream);
         logits.copy_to_host(logits_host.data(), logits_host.size() * sizeof(uint16_t));
         for (int64_t i = 0; i < chunk.valid_vocab; ++i) {
             const float v = f16_bits_to_f32(logits_host[static_cast<size_t>(i)]);
