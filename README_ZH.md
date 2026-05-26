@@ -71,6 +71,14 @@ source scripts/set_env.sh
 ./build/bench_decode --model ./Hy-MT2-1.8B --prompt-len 8 --decode 30
 ```
 
+真实 Hy-MT2-1.8B FP16 权重 baseline：
+
+| bench | setting | result |
+|---|---|---:|
+| prefill | prompt_len=8 | 22.74 s · 0.35 tok/s |
+| decode | prompt_len=8, decode=3 | 1.08 s/token · 0.92 tok/s |
+| decode | prompt_len=8, decode=30 | 1.28 s/token · 0.78 tok/s |
+
 当前 matmul microbench（本机 Orange Pi AIPro 20T，`--iters 1`，fp16 tensors）。`aclnn_bt` 是原 public-aclnn transposed-view 路径；`natural_or_cube` 使用预转置 `[K,N]` 权重，并在 M=1、N<=16384、N%128==0 时走 `MatmulCubeCustom`。
 
 | path | M | N | K | ms/iter | GFLOP/s |

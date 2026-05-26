@@ -82,6 +82,14 @@ source scripts/set_env.sh
 ./build/bench_decode --model ./Hy-MT2-1.8B --prompt-len 8 --decode 30
 ```
 
+Real-model baseline on Hy-MT2-1.8B FP16 weights:
+
+| bench | setting | result |
+|---|---|---:|
+| prefill | prompt_len=8 | 22.74 s · 0.35 tok/s |
+| decode | prompt_len=8, decode=3 | 1.08 s/token · 0.92 tok/s |
+| decode | prompt_len=8, decode=30 | 1.28 s/token · 0.78 tok/s |
+
 Current matmul microbench snapshot on this Orange Pi AIPro 20T (`--iters 1`,
 fp16 tensors). `aclnn_bt` is the original public-aclnn transposed-view path;
 `natural_or_cube` uses pre-transposed `[K,N]` weights and routes M=1, N<=16384,
@@ -139,7 +147,7 @@ Hy-MT2-orangepi/
 - `HunYuanDenseV1ForCausalLM` — standard Llama-flavored dense decoder
 - 32 layers · hidden 2048 · intermediate 6144 · SwiGLU
 - GQA: 16 Q heads × 4 KV heads × head_dim 128
-- Full RoPE (θ=10000, dynamic NTK scaling), `use_qk_norm=true`
+- Full RoPE (θ=10000, dynamic NTK scaling, max_position_embeddings 262144), `use_qk_norm=true`
 - RMSNorm ε=1e-5, no attention/MLP bias
 - `tie_word_embeddings=true` (lm_head shares embed_tokens)
 - vocab 120818 · BOS 120000 · EOS 120020

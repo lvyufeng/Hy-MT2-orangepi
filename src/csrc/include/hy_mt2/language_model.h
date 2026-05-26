@@ -20,7 +20,7 @@ struct LanguageModelConfig {
     int64_t head_dim{128};
     int64_t num_layers{32};
     int64_t vocab_size{120818};
-    int64_t max_position_embeddings{4096};
+    int64_t max_position_embeddings{262144};
     double rope_theta{10000.0};
     double rope_scaling_factor{1.0};
     double rms_epsilon{1e-5};

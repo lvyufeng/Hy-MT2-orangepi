@@ -181,8 +181,8 @@ LanguageModelWeights load_language_model_weights(WeightsIndex& index,
         lw.k_w = load_layer_weight_transposed(index, layer, "self_attn.k_proj.weight");
         lw.v_w = load_layer_weight_transposed(index, layer, "self_attn.v_proj.weight");
         lw.o_w = load_layer_weight_transposed(index, layer, "self_attn.o_proj.weight");
-        lw.q_norm_w = load_layer_weight(index, layer, "self_attn.q_norm.weight");
-        lw.k_norm_w = load_layer_weight(index, layer, "self_attn.k_norm.weight");
+        lw.q_norm_w = load_layer_weight(index, layer, "self_attn.query_layernorm.weight");
+        lw.k_norm_w = load_layer_weight(index, layer, "self_attn.key_layernorm.weight");
         lw.gate_w = load_layer_weight_transposed(index, layer, "mlp.gate_proj.weight");
         lw.up_w = load_layer_weight_transposed(index, layer, "mlp.up_proj.weight");
         lw.down_w = load_layer_weight_transposed(index, layer, "mlp.down_proj.weight");
