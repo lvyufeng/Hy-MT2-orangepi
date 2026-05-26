@@ -1,8 +1,8 @@
-# Hy-MT2 on Ascend 310B (Orange Pi AIPro 20T)
+# Hy-MT2 on Ascend 310B (Orange Pi AIPro 8T)
 
 [English] · [中文](README_ZH.md)
 
-Pure C++/CANN inference engine for [Tencent Hy-MT2-1.8B][hymt2] on Orange Pi AIPro 20T / Ascend 310B4.
+Pure C++/CANN inference engine for [Tencent Hy-MT2-1.8B][hymt2] on Orange Pi AIPro 8T / Ascend 310B4.
 
 The runtime exposes:
 
@@ -16,7 +16,7 @@ This project reuses infrastructure and custom-kernel patterns from [`lvyufeng/mi
 
 ## Requirements
 
-- Orange Pi AIPro 20T / Atlas 200I A2 / Ascend 310B4
+- Orange Pi AIPro 8T / Atlas 200I A2 / Ascend 310B4
 - Ubuntu aarch64
 - CANN 8.5.0 at `/usr/local/Ascend/cann-8.5.0/aarch64-linux/`
 - CMake >= 3.20
@@ -56,7 +56,7 @@ Input is one source sentence per stdin line. `--src` is accepted for CLI compati
 
 ## Benchmarks
 
-On Orange Pi AIPro 20T, current FP16 baseline:
+On Orange Pi AIPro 8T, current FP16 baseline:
 
 | bench | setting | result |
 |---|---|---:|

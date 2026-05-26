@@ -2,7 +2,7 @@
 # Source this script before running any engine binary. Sets the Ascend
 # toolkit and custom_opp paths.
 #
-# The CANN install on this Orange Pi AIPro 20T lives at a non-standard
+# The CANN install on this Orange Pi AIPro 8T lives at a non-standard
 # path; the usual `ascend-toolkit/latest` symlink is absent. Override
 # with HY_MT2_ASCEND_TOOLKIT_ROOT / HY_MT2_CUSTOM_OPP_VENDOR if your
 # install differs.

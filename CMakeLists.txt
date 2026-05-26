@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Ascend toolkit root. This Orange Pi AIPro 20T install lives at a
+# Ascend toolkit root. This Orange Pi AIPro 8T install lives at a
 # non-standard path — the usual `ascend-toolkit/latest` symlink isn't
 # present. Override with -DASCEND_TOOLKIT_ROOT=... if your install
 # differs.
